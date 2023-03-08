@@ -261,11 +261,13 @@ def Solve_HanLQ100(n, dirac, repeat=10):
     return para_logs
 
 para_logs = Solve_HanLQ100(100, True)
+cost_mean = [p['cost_mean'] for p in para_logs]
+cost_var = [p['cost_std']**2 for p in para_logs]
+print("cost: ", format_uncertainty(np.mean(cost_mean), np.std(cost_mean)))
+print("var: ", format_uncertainty(np.mean(cost_var), np.std(cost_var)))
 
-for p in para_logs:
-    print(p['cost_mean'])
-
-plt.plot(para_logs[4]['loss_log'])
-plt.yscale('log')
-
-
+para_logs = Solve_HanLQ100(100, True)
+cost_mean = [p['cost_mean'] for p in para_logs]
+cost_var = [p['cost_std']**2 for p in para_logs]
+print("cost: ", format_uncertainty(np.mean(cost_mean), np.std(cost_mean)))
+print("var: ", format_uncertainty(np.mean(cost_var), np.std(cost_var)))
