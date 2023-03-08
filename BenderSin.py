@@ -14,6 +14,7 @@
 
 # +
 import math
+import itertools
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -246,3 +247,89 @@ for _ in range(9):
 
 error = torch.stack(logs)
 plt.errorbar(range(error.shape[1]), error.mean(dim=0).numpy(), yerr=error.std(dim=0).numpy(), marker='^', capsize=2.0)
+
+
+# ## Search Hyperparameters
+
+def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
+    para_logs, loss_logs = [], [[] for _ in range(repeat)]
+    for epi in range(repeat):
+        _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+        
+        for k in solver_kws:
+            setattr(_solver, k, solver_kws[k])
+        
+        optimizer = _solver.get_optimizer()
+        
+        _solver.ynet.train()
+        _solver.znet.train()
+        optimizer.zero_grad()
+        for step in tqdm.trange(2000):
+            loss = _solver.calc_loss(dirac=dirac)
+            
+            loss_logs[epi].append(loss.item())
+            
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            
+        _solver.ynet.eval()
+        _solver.znet.eval()
+        _solver.batch_size = 512
+        with torch.no_grad():
+            t, X, Y, Z, dW = _solver.obtain_XYZ()
+        error = (Y - _solver.fbsde.get_Y(t, X)).abs().squeeze(-1).detach().cpu()
+        
+        para_logs.append({
+            'error_Y0': error.mean(dim=-1)[0].item(),
+            'error_mean': error.mean().item(),
+            'error_std': error.std().item(),
+        })
+        
+    para_logs_agg = {}
+    for k in para_logs[0].keys():
+        arr = [p[k] for p in para_logs]
+        para_logs_agg[k] = format_uncertainty(np.mean(arr), np.std(arr))
+        
+    return para_logs_agg, loss_logs
+
+
+# +
+search_mesh = {
+    'dirac': [False], #, True],
+    'y_lr': [5e-2], #, 5e-3, 5e-4, 5e-5],
+    'z_lr': [5e-2, 5e-3], #, 5e-4, 5e-5],
+    'batch_size': [64, 256], #, 1024],
+}
+
+res = []
+for args in itertools.product(*search_mesh.values()):
+    args = dict(zip(search_mesh.keys(), args))
+    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
+        continue
+
+    para_logs, loss_logs = solve_BenderSin(n=4, repeat=5, **args)
+    
+    res.append({
+        'args': args,
+        'para_logs': para_logs,
+        'loss_logs': loss_logs,
+    })
+# -
+
+pd.DataFrame([{**r['args'], **r['para_logs']} for r in res])
+
+# +
+r_figs = 3
+c_figs = 1 + len(res)//r_figs
+fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
+
+for i, j in itertools.product(range(c_figs), range(r_figs)):
+    if  i*r_figs + j >= len(res):
+        break
+    loss_arr = res[i*r_figs + j]['loss_logs']
+    loss_data = pd.DataFrame([
+        {'grad step': step, 'loss': loss_arr[exp_i][step], 'Exp No.': exp_i,} for exp_i, step in itertools.product(range(len(loss_arr)), range(len(loss_arr[0])))
+    ])
+    sns.lineplot(data=loss_data, x='grad step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
+    axes[i,j].set_yscale('log')
