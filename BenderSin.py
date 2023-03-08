@@ -24,7 +24,7 @@ import seaborn as sns
 # -
 
 TENSORDTYPE = torch.float64
-DEVICE = 'cuda:0'
+DEVICE = 'cpu'
 LOGROOTDIR = './Plot-Figure1-v1'
 
 
@@ -46,8 +46,8 @@ def re_cumsum(t, dim):
 
 
 def format_uncertainty(value, error):
-    return "{0:.{1}E}".format(value, math.floor(math.log10(value)) - math.floor(math.log10(error))
-                             ).replace("E", "({:.0f}) E".format(error*10**(-math.floor(math.log10(error)))))
+    digits = -int(math.floor(math.log10(error)))
+    return "{0:.{2}f}({1:.0f})".format(value, error*10**digits, digits)
 
 
 # # Problem
@@ -65,28 +65,34 @@ def format_uncertainty(value, error):
 
 # # FBSDE
 
-class FBSDE_HanLQ100(object):
+class FBSDE_BenderSin(object):
     
-    def __init__(self, n=100):
-        self.H = 25
-        self.dt = 0.04
+    def __init__(self, n=4):
+        self.H = 50
+        self.dt = 0.02
         self.n = n
-        self.m = self.n
+        self.m = 1
         self.d = self.n
         
-        self.x0 = 0. * torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
+        self.r = 0.
+        self.sigma_0 = 0.4
+        
+        self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
         
     def b(self, t, x, y, z):
-        return 2*y
-    
-    def sigma(self, t, x, y, z):
-        return np.sqrt(2)*torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
-    
-    def f(self, t, x, y, z):
         return 0.*x
     
+    def sigma(self, t, x, y, z):
+        return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
+    
+    def f(self, t, x, y, z):
+        return -self.r*y + .5*torch.exp(-3*self.r*(self.n*self.H-t))*self.sigma_0**2*(torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
+    
     def g(self, x):
-        return -2*x/(1+torch.sum(x*x, dim=-1, keepdim=True))
+        return torch.sum(torch.sin(x), dim=-1, keepdim=True)
+    
+    def get_Y(self, t, x):
+        return torch.exp(-self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
 
 
 # # Network
@@ -138,18 +144,20 @@ class FBSDE_BMLSolver(object):
 
     def __init__(self, fbsde):
         self.hidden_size = fbsde.n + 10
-        self.batch_size = 64
+        self.batch_size = 512
         
         self.fbsde = fbsde
         self.ynet = YNet_FC2L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
         self.znet = ZNet_FC2L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
         
         self.track_X_grad = False
+        self.y_lr = 5e-3
+        self.z_lr = 5e-3
         
     def get_optimizer(self):
         return torch.optim.Adam([
-            {'params': self.ynet.parameters(), 'lr': 5e-3,},
-            {'params': self.znet.parameters(), 'lr': 5e-3,}
+            {'params': self.ynet.parameters(), 'lr': self.y_lr,},
+            {'params': self.znet.parameters(), 'lr': self.z_lr,}
         ])
         
     def obtain_XYZ(self, t=None, dW=None):
@@ -189,7 +197,7 @@ class FBSDE_BMLSolver(object):
 
 # # Train
 
-solver = FBSDE_BMLSolver(FBSDE_HanLQ100(n=100))
+solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
 
 # +
 optimizer = solver.get_optimizer()
@@ -216,58 +224,25 @@ plt.yscale('log')
 solver.batch_size = 512
 t, X, Y, Z, dW = solver.obtain_XYZ()
 
-cost = torch.log(.5 + .5*(X[-1]*X[-1]).sum(dim=-1)) + solver.fbsde.dt * torch.sum(Y[:-1]*Y[:-1], dim=-1).sum(0)
+print((Y - solver.fbsde.get_Y(t, X)).abs()[0,0].item())
 
-cost.mean().item(), cost.std().item()
+logs = []
+for _ in range(9):
+    _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+    optimizer = _solver.get_optimizer()
 
-
-# # Train Multiple Models
-
-def Solve_HanLQ100(n, dirac, repeat=10):
-    para_logs = []
-    for _ in range(repeat):
-        solver = FBSDE_BMLSolver(FBSDE_HanLQ100(n=n))
-
-        optimizer = solver.get_optimizer()
-        loss_log = []
-
-        solver.ynet.train()
-        solver.znet.train()
+    _solver.ynet.train()
+    _solver.znet.train()
+    optimizer.zero_grad()
+    for step in tqdm.trange(2000):
+        loss = _solver.calc_loss(dirac=False)
+        loss.backward()
+        optimizer.step()
         optimizer.zero_grad()
-        for step in tqdm.trange(2000):
-            loss = solver.calc_loss(dirac=dirac)
-            
-            loss_log.append(loss.item())
-            
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            
-        solver.ynet.eval()
-        solver.znet.eval()
-        
-        solver.batch_size = 512
-        with torch.no_grad():
-            t, X, Y, Z, dW = solver.obtain_XYZ()
-            cost = torch.log(.5 + .5*(X[-1]*X[-1]).sum(dim=-1)) + solver.fbsde.dt * torch.sum(Y[:-1]*Y[:-1], dim=-1).sum(0)
-            
-        para_logs.append({
-            'loss_log': loss_log,
-            'cost_mean': cost.mean().item(),
-            'cost_std': cost.std().item(),
-        })
-            
- 
-    return para_logs
+    _solver.batch_size = 512
+    t, X, Y, Z, dW = _solver.obtain_XYZ()
+    error = (Y - solver.fbsde.get_Y(t, X)).abs().squeeze(-1).detach().cpu()
+    logs.append(error.mean(dim=-1))
 
-para_logs = Solve_HanLQ100(100, True)
-cost_mean = [p['cost_mean'] for p in para_logs]
-cost_var = [p['cost_std']**2 for p in para_logs]
-print("cost: ", format_uncertainty(np.mean(cost_mean), np.std(cost_mean)))
-print("var: ", format_uncertainty(np.mean(cost_var), np.std(cost_var)))
-
-para_logs = Solve_HanLQ100(100, True)
-cost_mean = [p['cost_mean'] for p in para_logs]
-cost_var = [p['cost_std']**2 for p in para_logs]
-print("cost: ", format_uncertainty(np.mean(cost_mean), np.std(cost_mean)))
-print("var: ", format_uncertainty(np.mean(cost_var), np.std(cost_var)))
+error = torch.stack(logs)
+plt.errorbar(range(error.shape[1]), error.mean(dim=0).numpy(), yerr=error.std(dim=0).numpy(), marker='^', capsize=2.0)
