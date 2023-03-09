@@ -14,7 +14,9 @@
 
 # +
 import math
+import time
 import itertools
+import os
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -26,7 +28,7 @@ import seaborn as sns
 
 TENSORDTYPE = torch.float64
 DEVICE = 'cpu'
-LOGROOTDIR = './Plot-Figure1-v1'
+LOGROOTDIR = './outputs'
 
 
 # All problem-specific functions accpet tensor arguments.
@@ -49,6 +51,10 @@ def re_cumsum(t, dim):
 def format_uncertainty(value, error):
     digits = -int(math.floor(math.log10(error)))
     return "{0:.{2}f}({1:.0f})".format(value, error*10**digits, digits)
+
+
+def time_dir():
+    return time.strftime("%y%m%d-%H%M", time.localtime())
 
 
 # # Problem
@@ -246,15 +252,15 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
 # +
 search_mesh = {
     'dirac': [False], #, True],
-    'y_lr': [5e-2, 5e-3, 5e-4, 5e-5],
-    'z_lr': [5e-2, 5e-3, 5e-4, 5e-5],
-    'batch_size': [64]#, 256], #, 1024],
+    'y_lr': [2e-3, 5e-3], #, 5e-4, 5e-5],
+    'z_lr': [5e-2, 5e-3, 5e-4],
+    'batch_size': [256], #, 1024],
 }
 
 res = []
 for args in itertools.product(*search_mesh.values()):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) < 1.9:
+    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
     para_logs, loss_logs = solve_BenderSin(n=4, repeat=10, **args)
@@ -266,7 +272,17 @@ for args in itertools.product(*search_mesh.values()):
     })
 # -
 
-pd.DataFrame([{**r['args'], **r['para_logs']} for r in res])
+args_df = pd.DataFrame([{**r['args'], **r['para_logs']} for r in res])
+args_df
+
+log_dir = os.path.join(LOGROOTDIR, time_dir())
+os.makedirs(log_dir, exist_ok=True)
+args_df.to_csv(os.path.join(log_dir, "args.csv"), index=False)
+print(f"args.csv saved to {log_dir}")
+
+loss_logs_m = np.asarray([r['loss_logs'] for r in res])
+np.save(os.path.join(log_dir, "loss_logs_m.npy"), loss_logs)
+print(f"loss_logs_m.npy saved to {log_dir}")
 
 # +
 r_figs = 3
