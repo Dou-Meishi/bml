@@ -101,6 +101,11 @@ class FBSDE_BenderSin(object):
     
     def get_Y(self, t, x):
         return torch.exp(-self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
+    
+    def get_Z(self, t, x):
+#         print(t.shape, x.shape)
+#         print((torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x).unsqueeze(-2)).shape)
+        return self.sigma_0*(torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
 
 
 # # Network
@@ -193,8 +198,12 @@ class FBSDE_BMLSolver(object):
         
         return t, X, Y, Z, dW
     
-    def calc_loss(self, t=None, dW=None, dirac=True):
-        t, X, Y, Z, dW = self.obtain_XYZ(t, dW)
+    def calc_loss(self, dirac=True, *, txyzw=None):
+        if txyzw is None:
+            t, X, Y, Z, dW = self.obtain_XYZ()
+        else:
+            t, X, Y, Z, dW = txyzw
+            
         if dirac:
             error = Y[0] - (self.fbsde.g(X[-1]) + self.fbsde.dt * torch.sum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - torch.sum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
             return torch.sum(error*error/dW.shape[1])
@@ -202,6 +211,25 @@ class FBSDE_BMLSolver(object):
             error = Y[:-1] - (self.fbsde.g(X[-1:]) + self.fbsde.dt * re_cumsum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - re_cumsum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
             return torch.sum(error/ dW.shape[1] * error * self.fbsde.dt)
 
+
+# # Loss of True Solutions
+
+# +
+optimal_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+optimal_solver.ynet = optimal_solver.fbsde.get_Y
+optimal_solver.znet = optimal_solver.fbsde.get_Z
+
+dirac_loss, lambd_loss = [], []
+for _ in range(10):
+    t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
+    dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
+    lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
+    
+print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
+print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
+
+
+# -
 
 # # Train
 
