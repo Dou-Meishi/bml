@@ -198,57 +198,6 @@ class FBSDE_BMLSolver(object):
 
 # # Train
 
-solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
-
-# +
-optimizer = solver.get_optimizer()
-para_log = []
-
-solver.ynet.train()
-solver.znet.train()
-optimizer.zero_grad()
-for step in tqdm.trange(2000):
-    loss = solver.calc_loss(dirac=False)
-    
-    para_log.append({'step': step+1, 'loss': loss.item()})
-    
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-# -
-
-para_log = pd.DataFrame(para_log)
-
-plt.plot(para_log.step, para_log.loss)
-plt.yscale('log')
-
-solver.batch_size = 512
-t, X, Y, Z, dW = solver.obtain_XYZ()
-
-print((Y - solver.fbsde.get_Y(t, X)).abs()[0,0].item())
-
-logs = []
-for _ in range(9):
-    _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
-    optimizer = _solver.get_optimizer()
-
-    _solver.ynet.train()
-    _solver.znet.train()
-    optimizer.zero_grad()
-    for step in tqdm.trange(2000):
-        loss = _solver.calc_loss(dirac=False)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-    _solver.batch_size = 512
-    t, X, Y, Z, dW = _solver.obtain_XYZ()
-    error = (Y - solver.fbsde.get_Y(t, X)).abs().squeeze(-1).detach().cpu()
-    logs.append(error.mean(dim=-1))
-
-error = torch.stack(logs)
-plt.errorbar(range(error.shape[1]), error.mean(dim=0).numpy(), yerr=error.std(dim=0).numpy(), marker='^', capsize=2.0)
-
-
 # ## Search Hyperparameters
 
 def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
