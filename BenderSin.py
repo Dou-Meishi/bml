@@ -254,7 +254,7 @@ search_mesh = {
 res = []
 for args in itertools.product(*search_mesh.values()):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
+    if abs(np.log10(args['y_lr']/args['z_lr'])) < 1.9:
         continue
 
     para_logs, loss_logs = solve_BenderSin(n=4, repeat=10, **args)
