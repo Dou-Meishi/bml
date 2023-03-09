@@ -252,8 +252,8 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
 # +
 search_mesh = {
     'dirac': [False], #, True],
-    'y_lr': [5e-2, 5e-3], #, 5e-4, 5e-5],
-    'z_lr': [5e-3, 5e-4, 5e-5],
+    'y_lr': [2e-3, 5e-3], #, 5e-4, 5e-5],
+    'z_lr': [5e-2, 5e-3, 5e-4],
     'batch_size': [256], #, 1024],
 }
 
@@ -263,7 +263,7 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    para_logs, loss_logs = solve_BenderSin(n=4, repeat=5, **args)
+    para_logs, loss_logs = solve_BenderSin(n=4, repeat=10, **args)
     
     res.append({
         'args': args,
