@@ -255,7 +255,7 @@ search_mesh = {
     'dirac': [False], #, True],
     'y_lr': [0.05, 0.01, 5e-3], #, 5e-4, 5e-5],
     'z_lr': [0.01, 5e-3, 1e-3],
-    'batch_size': [256], #, 1024],
+    'batch_size': [512], #, 1024],
 }
 
 res = []
