@@ -253,9 +253,9 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
 # +
 search_mesh = {
     'dirac': [False], #, True],
-    'y_lr': [0.01], #, 5e-4, 5e-5],
-    'z_lr': [1e-3],
-    'batch_size': [512, 1024, 4096], #, 1024],
+    'y_lr': [0.02, 0.01, 0.008], #, 5e-4, 5e-5],
+    'z_lr': [0.002, 0.001, 8e-4],
+    'batch_size': [512], #, 1024],
 }
 
 res = []
