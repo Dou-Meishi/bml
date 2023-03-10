@@ -111,13 +111,15 @@ class FBSDE_BenderSin(object):
 # # Network
 
 # +
-class YNet_FC2L(torch.nn.Module):
+class YNet_FC3L(torch.nn.Module):
     
     def __init__(self, n, m, *, hidden_size):
         super().__init__()
         
         self.fcnet = torch.nn.Sequential(
             torch.nn.Linear(1+n, hidden_size, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, hidden_size, bias=True),
             torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, m, bias=True)
         )
@@ -129,7 +131,7 @@ class YNet_FC2L(torch.nn.Module):
         return self.fcnet(z)
     
     
-class ZNet_FC2L(torch.nn.Module):
+class ZNet_FC3L(torch.nn.Module):
     
     def __init__(self, n, m, d, *, hidden_size):
         super().__init__()
@@ -139,7 +141,9 @@ class ZNet_FC2L(torch.nn.Module):
         self.fcnet = torch.nn.Sequential(
             torch.nn.Linear(1+n, hidden_size, bias=True),
             torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m*d, bias=True)
+            torch.nn.Linear(hidden_size, hidden_size, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, m*d, bias=True),
         )
         
         self.to(dtype=TENSORDTYPE, device=DEVICE)
@@ -160,8 +164,8 @@ class FBSDE_BMLSolver(object):
         self.batch_size = 512
         
         self.fbsde = fbsde
-        self.ynet = YNet_FC2L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
-        self.znet = ZNet_FC2L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
+        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
+        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
         
         self.track_X_grad = False
         self.y_lr = 5e-3
@@ -211,25 +215,6 @@ class FBSDE_BMLSolver(object):
             error = Y[:-1] - (self.fbsde.g(X[-1:]) + self.fbsde.dt * re_cumsum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - re_cumsum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
             return torch.sum(error/ dW.shape[1] * error * self.fbsde.dt)
 
-
-# # Loss of True Solutions
-
-# +
-optimal_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
-optimal_solver.ynet = optimal_solver.fbsde.get_Y
-optimal_solver.znet = optimal_solver.fbsde.get_Z
-
-dirac_loss, lambd_loss = [], []
-for _ in range(10):
-    t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
-    dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
-    lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
-    
-print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
-print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
-
-
-# -
 
 # # Train
 
@@ -281,18 +266,15 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
 # +
 search_mesh = {
     'dirac': [False], #, True],
-    'y_lr': [5e-3], #, 5e-4, 5e-5],
-    'z_lr': [5e-3],
-    'batch_size': [256], #, 1024],
-    
-    'r': [0., 1.],
-    'sigma_0': [0.2, 0.4],
+    'y_lr': [1e-2, 1e-3, 1e-4, 1e-5], #, 5e-4, 5e-5],
+    'z_lr': [1e-2, 1e-3, 1e-4, 1e-5],
+    'batch_size': [512], #, 1024],
 }
 
 res = []
 for args in itertools.product(*search_mesh.values()):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
+    if abs(np.log10(args['y_lr']/args['z_lr'])) > 7.9:
         continue
 
     para_logs, loss_logs = solve_BenderSin(n=4, repeat=10, **args)
