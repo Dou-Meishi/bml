@@ -111,13 +111,15 @@ class FBSDE_BenderSin(object):
 # # Network
 
 # +
-class YNet_FC2L(torch.nn.Module):
+class YNet_FC3L(torch.nn.Module):
     
     def __init__(self, n, m, *, hidden_size):
         super().__init__()
         
         self.fcnet = torch.nn.Sequential(
             torch.nn.Linear(1+n, hidden_size, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, hidden_size, bias=True),
             torch.nn.ReLU(),
             torch.nn.Linear(hidden_size, m, bias=True)
         )
@@ -129,7 +131,7 @@ class YNet_FC2L(torch.nn.Module):
         return self.fcnet(z)
     
     
-class ZNet_FC2L(torch.nn.Module):
+class ZNet_FC3L(torch.nn.Module):
     
     def __init__(self, n, m, d, *, hidden_size):
         super().__init__()
@@ -139,7 +141,9 @@ class ZNet_FC2L(torch.nn.Module):
         self.fcnet = torch.nn.Sequential(
             torch.nn.Linear(1+n, hidden_size, bias=True),
             torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m*d, bias=True)
+            torch.nn.Linear(hidden_size, hidden_size, bias=True),
+            torch.nn.ReLU(),
+            torch.nn.Linear(hidden_size, m*d, bias=True),
         )
         
         self.to(dtype=TENSORDTYPE, device=DEVICE)
@@ -160,8 +164,8 @@ class FBSDE_BMLSolver(object):
         self.batch_size = 512
         
         self.fbsde = fbsde
-        self.ynet = YNet_FC2L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
-        self.znet = ZNet_FC2L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
+        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
+        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
         
         self.track_X_grad = False
         self.y_lr = 5e-3
