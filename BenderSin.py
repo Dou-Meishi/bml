@@ -283,7 +283,7 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
     para_logs, loss_logs = [], [[] for _ in range(repeat)]
     for epi in range(repeat):
-        _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+        _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=n))
         
         for k in solver_kws:
             _solver.set_parameter(k, solver_kws[k])
