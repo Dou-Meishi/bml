@@ -346,8 +346,10 @@ print(f"loss_logs_m.npy saved to {log_dir}")
 
 # +
 r_figs = 3
-c_figs = 1 + len(res)//r_figs
+c_figs = math.ceil(len(res)/r_figs)
 fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
+if c_figs == 1:
+    axes = axes.reshape(1, -1)
 
 for i, j in itertools.product(range(c_figs), range(r_figs)):
     if  i*r_figs + j >= len(res):
