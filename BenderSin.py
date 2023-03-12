@@ -95,18 +95,16 @@ class FBSDE_BenderSin(object):
         return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
     
     def f(self, t, x, y, z):
-        return -self.r*y + .5*torch.exp(-3*self.r*(self.n*self.H-t))*self.sigma_0**2*(torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
+        return -self.r*y + .5*torch.exp(-3*self.r*(self.dt*self.H-t))*self.sigma_0**2*(torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
     
     def g(self, x):
         return torch.sum(torch.sin(x), dim=-1, keepdim=True)
     
     def get_Y(self, t, x):
-        return torch.exp(-self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
+        return torch.exp(-self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
     
     def get_Z(self, t, x):
-#         print(t.shape, x.shape)
-#         print((torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x).unsqueeze(-2)).shape)
-        return self.sigma_0*(torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
+        return self.sigma_0*(torch.exp(-2*self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
 
 
 # # Network
