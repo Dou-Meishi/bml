@@ -49,6 +49,7 @@ def re_cumsum(t, dim):
 
 
 def format_uncertainty(value, error, sig_fig=2):
+    if error <= 0: return f"{value:.2G} ± {error:.2G}"
     digits = -math.floor(math.log10(error)) + sig_fig - 1
     if digits < 0: return f"{value:.2G} ± {error:.2G}"
     return "{0:.{2}f}({1:.0f})".format(value, error*10**digits, digits)
@@ -94,18 +95,16 @@ class FBSDE_BenderSin(object):
         return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
     
     def f(self, t, x, y, z):
-        return -self.r*y + .5*torch.exp(-3*self.r*(self.n*self.H-t))*self.sigma_0**2*(torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
+        return -self.r*y + .5*torch.exp(-3*self.r*(self.dt*self.H-t))*self.sigma_0**2*(torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
     
     def g(self, x):
         return torch.sum(torch.sin(x), dim=-1, keepdim=True)
     
     def get_Y(self, t, x):
-        return torch.exp(-self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
+        return torch.exp(-self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
     
     def get_Z(self, t, x):
-#         print(t.shape, x.shape)
-#         print((torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x).unsqueeze(-2)).shape)
-        return self.sigma_0*(torch.exp(-2*self.r*(self.n*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
+        return self.sigma_0*(torch.exp(-2*self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
 
 
 # # Network
@@ -171,6 +170,14 @@ class FBSDE_BMLSolver(object):
         self.y_lr = 5e-3
         self.z_lr = 5e-3
         
+    def set_parameter(self, name, value):
+        if hasattr(self, name):
+            setattr(self, name, value)
+        elif hasattr(self.fbsde, name):
+            setattr(self.fbsde, name, value)
+        else:
+            raise ValueError(f"{name} is not a proper parameter")
+        
     def get_optimizer(self):
         return torch.optim.Adam([
             {'params': self.ynet.parameters(), 'lr': self.y_lr,},
@@ -216,6 +223,22 @@ class FBSDE_BMLSolver(object):
             return torch.sum(error/ dW.shape[1] * error * self.fbsde.dt)
 
 
+# # Benchmark of Func calc_loss
+
+# +
+test_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+with torch.no_grad():
+    t, X, Y, Z, dW = test_solver.obtain_XYZ()
+
+terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)
+running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*np.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True))**3)
+martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
+
+assert terminal_error.abs().max() < 1e-15
+assert running_error.abs().max() < 1e-15
+assert martingale_error.abs().max() < 1e-15
+# -
+
 # # Loss of True Solutions
 
 # +
@@ -223,12 +246,17 @@ optimal_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
+optimal_solver.set_parameter('sigma_0', 0.4)
+optimal_solver.set_parameter('r', 0.25)
+optimal_solver.set_parameter('H', 10)
+optimal_solver.set_parameter('dt', 0.02)
+
 dirac_loss, lambd_loss = [], []
 for _ in range(10):
     t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
     dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
     lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
-    
+
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
 
@@ -245,7 +273,7 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
         _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
         
         for k in solver_kws:
-            setattr(_solver, k, solver_kws[k])
+            _solver.set_parameter(k, solver_kws[k])
         
         optimizer = _solver.get_optimizer()
         
