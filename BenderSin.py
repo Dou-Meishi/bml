@@ -49,6 +49,7 @@ def re_cumsum(t, dim):
 
 
 def format_uncertainty(value, error, sig_fig=2):
+    if error <= 0: return f"{value:.2G} ± {error:.2G}"
     digits = -math.floor(math.log10(error)) + sig_fig - 1
     if digits < 0: return f"{value:.2G} ± {error:.2G}"
     return "{0:.{2}f}({1:.0f})".format(value, error*10**digits, digits)
