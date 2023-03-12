@@ -16,6 +16,7 @@
 import math
 import time
 import itertools
+import functools
 import os
 
 import numpy as np
@@ -211,12 +212,22 @@ class FBSDE_BMLSolver(object):
         else:
             t, X, Y, Z, dW = txyzw
             
-        if dirac:
+        if dirac is True:
             error = Y[0] - (self.fbsde.g(X[-1]) + self.fbsde.dt * torch.sum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - torch.sum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
             return torch.sum(error*error/dW.shape[1])
         else:
             error = Y[:-1] - (self.fbsde.g(X[-1:]) + self.fbsde.dt * re_cumsum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - re_cumsum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
-            return torch.sum(error/ dW.shape[1] * error * self.fbsde.dt)
+            if dirac is False:
+                return torch.sum(error/ dW.shape[1] * error * self.fbsde.dt)
+            elif isinstance(dirac, float):
+               # weight = torch.exp(-dirac*t[:-1]/self.fbsde.dt)*(1-np.exp(-dirac))/(1-np.exp(-dirac*t.shape[0]))
+                return torch.sum(error/ dW.shape[1] * error * self._get_weight(dirac, t.shape[0]-1).view(*([-1] + [1]*(len(t.shape)-1))))
+            else:
+                raise ValueError(f"Unknown dirac value={dirac}")
+         
+    @functools.lru_cache(maxsize=None)
+    def _get_weight(self, gamma, N):
+        return (1-np.exp(-gamma))/(1-np.exp(-gamma*N))*torch.exp(-gamma*torch.arange(N)).to(dtype=TENSORDTYPE, device=DEVICE)
 
 
 # # Benchmark of Func calc_loss
@@ -243,18 +254,20 @@ optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
 optimal_solver.set_parameter('sigma_0', 0.4)
-optimal_solver.set_parameter('r', 0.25)
-optimal_solver.set_parameter('H', 10)
+optimal_solver.set_parameter('r', 1.)
+optimal_solver.set_parameter('H', 50)
 optimal_solver.set_parameter('dt', 0.02)
 
-dirac_loss, lambd_loss = [], []
+dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in range(10):
     t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
     dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
     lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
+    gamma_loss.append(optimal_solver.calc_loss(dirac=0.05, txyzw=(t, X, Y, Z, dW)).item())
 
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
+print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 
 # -
