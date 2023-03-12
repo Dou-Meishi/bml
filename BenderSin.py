@@ -166,6 +166,14 @@ class FBSDE_BMLSolver(object):
         self.y_lr = 5e-3
         self.z_lr = 5e-3
         
+    def set_parameter(self, name, value):
+        if hasattr(self, name):
+            setattr(self, name, value)
+        elif hasattr(self.fbsde, name):
+            setattr(self.fbsde, name, value)
+        else:
+            raise ValueError(f"{name} is not a proper parameter")
+        
     def get_optimizer(self):
         return torch.optim.Adam([
             {'params': self.ynet.parameters(), 'lr': self.y_lr,},
@@ -218,12 +226,17 @@ optimal_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
+optimal_solver.set_parameter('sigma_0', 0.4)
+optimal_solver.set_parameter('r', 0.25)
+optimal_solver.set_parameter('H', 10)
+optimal_solver.set_parameter('dt', 0.02)
+
 dirac_loss, lambd_loss = [], []
 for _ in range(10):
     t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
     dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
     lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
-    
+
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
 
@@ -240,7 +253,7 @@ def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
         _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
         
         for k in solver_kws:
-            setattr(_solver, k, solver_kws[k])
+            _solver.set_parameter(k, solver_kws[k])
         
         optimizer = _solver.get_optimizer()
         
