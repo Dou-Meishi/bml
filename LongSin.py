@@ -79,7 +79,7 @@ class FBSDE_LongSin(object):
     
     def __init__(self, n=4):
         self.H = 50
-        self.dt = 0.02
+        self.T = 1.0
         self.n = n
         self.m = 1
         self.d = self.n
@@ -88,6 +88,10 @@ class FBSDE_LongSin(object):
         self.sigma_0 = 0.4
         
         self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
+        
+    @property
+    def dt(self):
+        return self.T/self.H
         
     def b(self, t, x, y, z):
         return 0.*x
@@ -257,10 +261,9 @@ optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('sigma_0', 0.4)
-optimal_solver.set_parameter('r', 1.)
-optimal_solver.set_parameter('H', 50)
-optimal_solver.set_parameter('dt', 0.02)
+optimal_solver.set_parameter('sigma_0', 0.3)
+optimal_solver.set_parameter('r', .1)
+optimal_solver.set_parameter('H', 200)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in range(10):
