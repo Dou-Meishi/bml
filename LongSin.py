@@ -359,26 +359,31 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    para_logs, loss_logs = solve_LongSin(n=4, repeat=10, **args)
+    tab_logs, fig_logs = solve_LongSin(n=4, repeat=3, **args)
     
     res.append({
         'args': args,
-        'para_logs': para_logs,
-        'loss_logs': loss_logs,
+        'tab_logs': tab_logs,
+        'fig_logs': fig_logs,
     })
+
+# +
+tab_logs = [pd.DataFrame(r['tab_logs']) for r in res]
+fig_logs = [pd.DataFrame(r['fig_logs']) for r in res]
+
+tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
+fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
 # -
 
-args_df = pd.DataFrame([{**r['args'], **r['para_logs']} for r in res])
+args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
 args_df
 
 log_dir = os.path.join(LOGROOTDIR, time_dir())
 os.makedirs(log_dir, exist_ok=True)
-args_df.to_csv(os.path.join(log_dir, "args.csv"), index=False)
-print(f"args.csv saved to {log_dir}")
 
-loss_logs_m = np.asarray([r['loss_logs'] for r in res])
-np.save(os.path.join(log_dir, "loss_logs_m.npy"), loss_logs)
-print(f"loss_logs_m.npy saved to {log_dir}")
+for _df, _name in zip([args_df, tab_logs, fig_logs], ['args_df', 'tab_logs', 'fig_logs']):
+    _df.to_csv(os.path.join(log_dir, _name+".csv"), index=False)
+    print(f"{_name}.csv saved to {log_dir}")
 
 # +
 r_figs = 3
@@ -387,12 +392,13 @@ fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
 if c_figs == 1:
     axes = axes.reshape(1, -1)
 
+fig_logs_gb = fig_logs.groupby('args')    
+
 for i, j in itertools.product(range(c_figs), range(r_figs)):
     if  i*r_figs + j >= len(res):
         break
-    loss_arr = res[i*r_figs + j]['loss_logs']
-    loss_data = pd.DataFrame([
-        {'grad step': step, 'loss': loss_arr[exp_i][step], 'Exp No.': exp_i,} for exp_i, step in itertools.product(range(len(loss_arr)), range(len(loss_arr[0])))
-    ])
-    sns.lineplot(data=loss_data, x='grad step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
+    sns.lineplot(data=fig_logs_gb.get_group(i*r_figs+j), x='step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
     axes[i,j].set_yscale('log')
+# -
+
+fig.savefig(os.path.join(log_dir, "fig.pdf"))
