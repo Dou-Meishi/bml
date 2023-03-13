@@ -312,7 +312,7 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(2000):
+        for step in tqdm.trange(3000):
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -360,7 +360,7 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    tab_logs, fig_logs = solve_LongSin(n=4, repeat=3, **args)
+    tab_logs, fig_logs = solve_LongSin(n=4, repeat=10, **args)
     
     res.append({
         'args': args,
