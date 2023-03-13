@@ -163,7 +163,7 @@ class ZNet_FC3L(torch.nn.Module):
 
 class FBSDE_BMLSolver(object):
 
-    def __init__(self, fbsde):
+    def __init__(self, fbsde, dirac=False):
         self.hidden_size = fbsde.n + 10
         self.batch_size = 512
         
@@ -172,6 +172,7 @@ class FBSDE_BMLSolver(object):
         self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
         
         self.track_X_grad = False
+        self.dirac = dirac
         self.y_lr = 5e-3
         self.z_lr = 5e-3
         
@@ -214,12 +215,10 @@ class FBSDE_BMLSolver(object):
         
         return t, X, Y, Z, dW
     
-    def calc_loss(self, dirac=True, *, txyzw=None):
-        if txyzw is None:
-            t, X, Y, Z, dW = self.obtain_XYZ()
-        else:
-            t, X, Y, Z, dW = txyzw
-            
+    def calc_loss(self, *, dirac=None, txyzw=None):   
+        t, X, Y, Z, dW = self.obtain_XYZ() if txyzw is None else txyzw
+        dirac = self.dirac if dirac is None else dirac
+        
         if dirac is True:
             error = Y[0] - (self.fbsde.g(X[-1]) + self.fbsde.dt * torch.sum(self.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0) - torch.sum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
             return torch.sum(error*error/dW.shape[1])
