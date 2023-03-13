@@ -77,39 +77,36 @@ def time_dir():
 
 class FBSDE_FuSinCos(object):
     
-    def __init__(self, n=4):
-        self.H = 50
+    def __init__(self):
+        self.H = 25
         self.T = 1.0
-        self.n = n
+        self.n = 1
         self.m = 1
-        self.d = self.n
-        
-        self.r = 0.
-        self.sigma_0 = 0.4
-        
-        self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
+        self.d = 1
+
+        self.x0 = torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
         
     @property
     def dt(self):
         return self.T/self.H
         
     def b(self, t, x, y, z):
-        return 0.*x
-    
+        return -.25*torch.sin(2*(t+x))*(y*y+z.squeeze(-1))
+
     def sigma(self, t, x, y, z):
-        return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
+        return (.5*torch.cos(t+x)*(y*torch.sin(t+x)+z.squeeze(-1)+1)).unsqueeze(-1)
     
     def f(self, t, x, y, z):
-        return -self.r*y + .5*torch.exp(-3*self.r*(self.dt*self.H-t))*self.sigma_0**2*(10/self.n*torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
-    
+        return y*z.squeeze(-1)-torch.cos(t+x)
+
     def g(self, x):
-        return 10/self.n*torch.sum(torch.sin(x), dim=-1, keepdim=True)
+        return torch.sin(self.T+x)
     
     def get_Y(self, t, x):
-        return 10/self.n*torch.exp(-self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
+        return torch.sin(t+x)
     
     def get_Z(self, t, x):
-        return self.sigma_0*100/self.n**2*(torch.exp(-2*self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
+        return torch.cos(t+x).unsqueeze(-1)
 
 
 # # Network
@@ -256,12 +253,12 @@ class FBSDE_BMLSolver(object):
 # # Benchmark of Func calc_loss
 
 # +
-test_solver = FBSDE_BMLSolver(FBSDE_FuSinCos(n=4))
+test_solver = FBSDE_BMLSolver(FBSDE_FuSinCos())
 with torch.no_grad():
     t, X, Y, Z, dW = test_solver.obtain_XYZ()
 
-terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_solver.fbsde.d
-running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*torch.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_solver.fbsde.d)**3)
+terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - torch.sin(test_solver.fbsde.T+X[-1]).squeeze()
+running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (Y[:-1]*(Z[:-1].squeeze(-1))-torch.cos(t[:-1]+X[:-1]))
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
 assert terminal_error.abs().max() < 1e-15
@@ -272,13 +269,11 @@ assert martingale_error.abs().max() < 1e-15
 # # Loss of True Solutions
 
 # +
-optimal_solver = FBSDE_BMLSolver(FBSDE_FuSinCos(n=4))
+optimal_solver = FBSDE_BMLSolver(FBSDE_FuSinCos())
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('sigma_0', 0.4)
-optimal_solver.set_parameter('r', .0)
-optimal_solver.set_parameter('H', 50)
+optimal_solver.set_parameter('H', 25)
 optimal_solver.set_parameter('T', 1.)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
@@ -297,10 +292,10 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # # Train
 
-def solve_FuSinCos(n, *, repeat=10, **solver_kws):
+def solve_FuSinCos(*, repeat=10, **solver_kws):
     tab_logs, fig_logs = [], []
     for epi in range(repeat):
-        _solver = FBSDE_BMLSolver(FBSDE_FuSinCos(n=n))
+        _solver = FBSDE_BMLSolver(FBSDE_FuSinCos())
         
         for k in solver_kws:
             _solver.set_parameter(k, solver_kws[k])
@@ -350,8 +345,7 @@ search_mesh = {
     'z_lr': [5e-3],
     'batch_size': [512], #, 1024],
     
-    'r': [0.],
-    'sigma_0': [0.4],
+
 }
 
 res = []
@@ -360,7 +354,7 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    tab_logs, fig_logs = solve_FuSinCos(n=4, repeat=3, **args)
+    tab_logs, fig_logs = solve_FuSinCos(repeat=3, **args)
     
     res.append({
         'args': args,
