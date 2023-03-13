@@ -276,12 +276,13 @@ optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('sigma_0', 0.3)
-optimal_solver.set_parameter('r', .1)
-optimal_solver.set_parameter('H', 200)
+optimal_solver.set_parameter('sigma_0', 0.4)
+optimal_solver.set_parameter('r', .0)
+optimal_solver.set_parameter('H', 50)
+optimal_solver.set_parameter('T', 1.)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
-for _ in range(10):
+for _ in tqdm.trange(10):
     t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
     dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
     lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
@@ -344,13 +345,13 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
 
 # +
 search_mesh = {
-    'dirac': [False], #, True],
+    'dirac': [False, True, 0.05], #, True],
     'y_lr': [5e-3], #, 5e-4, 5e-5],
     'z_lr': [5e-3],
-    'batch_size': [256], #, 1024],
+    'batch_size': [512], #, 1024],
     
-    'r': [0., 1.],
-    'sigma_0': [0.2, 0.4],
+    'r': [0.],
+    'sigma_0': [0.4],
 }
 
 res = []
