@@ -235,6 +235,22 @@ class FBSDE_BMLSolver(object):
     @functools.lru_cache(maxsize=None)
     def _get_weight(self, gamma, N):
         return (1-np.exp(-gamma))/(1-np.exp(-gamma*N))*torch.exp(-gamma*torch.arange(N)).to(dtype=TENSORDTYPE, device=DEVICE)
+    
+    def calc_metric_y0(self):
+        r'''assume initial time is 0.'''
+        t0 = torch.zeros(1, 1, 1).to(dtype=TENSORDTYPE, device=DEVICE)
+        x0 = self.fbsde.x0.view(1, 1, -1)
+        pred_y0 = self.ynet(t0, x0).flatten()[0].item()
+        true_y0 = self.fbsde.get_Y(t0, x0).flatten()[0].item()
+        return pred_y0, abs(pred_y0/true_y0 -1.)*100
+    
+    def calc_metric_z0(self):
+        r'''assume initial time is 0.'''
+        t0 = torch.zeros(1, 1, 1).to(dtype=TENSORDTYPE, device=DEVICE)
+        x0 = self.fbsde.x0.view(1, 1, -1)
+        pred_z0 = self.znet(t0, x0).flatten()[0].item()
+        true_z0 = self.fbsde.get_Z(t0, x0).flatten()[0].item()
+        return pred_z0, abs(pred_z0/true_z0 - 1.)*100
 
 
 # # Benchmark of Func calc_loss
@@ -274,8 +290,6 @@ for _ in range(10):
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
 print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
-
-
 # -
 
 # # Train
