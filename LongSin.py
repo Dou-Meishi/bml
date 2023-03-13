@@ -388,6 +388,7 @@ print(f"fig_logs.csv saved to {log_dir}")
 # -
 
 args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
+args_df = pd.concat([pd.DataFrame([r['args'] for r in res]), args_df], axis=1)
 args_df
 
 args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
