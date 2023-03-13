@@ -297,8 +297,6 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # # Train
 
-# ## Search Hyperparameters
-
 def solve_LongSin(n, *, repeat=10, **solver_kws):
     tab_logs, fig_logs = [], []
     for epi in range(repeat):
@@ -343,6 +341,8 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
     return tab_logs, fig_logs
 
 
+# ## Search Hyperparameters
+
 # +
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
@@ -376,15 +376,22 @@ tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index
 fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
 # -
 
-args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
-args_df
-
 log_dir = os.path.join(LOGROOTDIR, time_dir())
 os.makedirs(log_dir, exist_ok=True)
 
-for _df, _name in zip([args_df, tab_logs, fig_logs], ['args_df', 'tab_logs', 'fig_logs']):
-    _df.to_csv(os.path.join(log_dir, _name+".csv"), index=False)
-    print(f"{_name}.csv saved to {log_dir}")
+# +
+tab_logs.to_csv(os.path.join(log_dir, 'tab_logs.csv'), index=False)
+print(f"tab_logs.csv saved to {log_dir}")
+
+fig_logs.to_csv(os.path.join(log_dir, 'fig_logs.csv'), index=False)
+print(f"fig_logs.csv saved to {log_dir}")
+# -
+
+args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
+args_df
+
+args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
+print(f"args_df.csv saved to {log_dir}")
 
 # +
 r_figs = 3
