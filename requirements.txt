@@ -1,0 +1,6 @@
+
+numpy
+matplotlib
+pandas
+tqdm
+seaborn >= 0.12
