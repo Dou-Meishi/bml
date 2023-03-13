@@ -75,7 +75,7 @@ def time_dir():
 
 # # FBSDE
 
-class FBSDE_BenderSin(object):
+class FBSDE_LongSin(object):
     
     def __init__(self, n=4):
         self.H = 50
@@ -237,7 +237,7 @@ class FBSDE_BMLSolver(object):
 # # Benchmark of Func calc_loss
 
 # +
-test_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 with torch.no_grad():
     t, X, Y, Z, dW = test_solver.obtain_XYZ()
 
@@ -253,7 +253,7 @@ assert martingale_error.abs().max() < 1e-15
 # # Loss of True Solutions
 
 # +
-optimal_solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=4))
+optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
@@ -280,10 +280,10 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # ## Search Hyperparameters
 
-def solve_BenderSin(n, *, dirac, repeat=10, **solver_kws):
+def solve_LongSin(n, *, dirac, repeat=10, **solver_kws):
     para_logs, loss_logs = [], [[] for _ in range(repeat)]
     for epi in range(repeat):
-        _solver = FBSDE_BMLSolver(FBSDE_BenderSin(n=n))
+        _solver = FBSDE_BMLSolver(FBSDE_LongSin(n=n))
         
         for k in solver_kws:
             _solver.set_parameter(k, solver_kws[k])
@@ -340,7 +340,7 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    para_logs, loss_logs = solve_BenderSin(n=4, repeat=10, **args)
+    para_logs, loss_logs = solve_LongSin(n=4, repeat=10, **args)
     
     res.append({
         'args': args,
