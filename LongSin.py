@@ -290,14 +290,16 @@ for _ in range(10):
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
 print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
+
+
 # -
 
 # # Train
 
 # ## Search Hyperparameters
 
-def solve_LongSin(n, *, dirac, repeat=10, **solver_kws):
-    para_logs, loss_logs = [], [[] for _ in range(repeat)]
+def solve_LongSin(n, *, repeat=10, **solver_kws):
+    tab_logs, fig_logs = [], []
     for epi in range(repeat):
         _solver = FBSDE_BMLSolver(FBSDE_LongSin(n=n))
         
@@ -310,9 +312,13 @@ def solve_LongSin(n, *, dirac, repeat=10, **solver_kws):
         _solver.znet.train()
         optimizer.zero_grad()
         for step in tqdm.trange(2000):
-            loss = _solver.calc_loss(dirac=dirac)
+            loss = _solver.calc_loss()
             
-            loss_logs[epi].append(loss.item())
+            fig_logs.append({
+                'epi': epi,
+                'step': step,
+                'loss': loss.item(),
+            })
             
             loss.backward()
             optimizer.step()
@@ -322,21 +328,18 @@ def solve_LongSin(n, *, dirac, repeat=10, **solver_kws):
         _solver.znet.eval()
         _solver.batch_size = 512
         with torch.no_grad():
-            t, X, Y, Z, dW = _solver.obtain_XYZ()
-        error = (Y - _solver.fbsde.get_Y(t, X)).abs().squeeze(-1).detach().cpu()
+            pred_y0, relative_error_y0 = _solver.calc_metric_y0()
+            pred_z0, relative_error_z0 = _solver.calc_metric_z0()
         
-        para_logs.append({
-            'error_Y0': error.mean(dim=-1)[0].item(),
-            'error_mean': error.mean().item(),
-            'error_std': error.std().item(),
+        tab_logs.append({
+            'epi': epi,
+            'Y0': pred_y0,
+            'Err Y0': relative_error_y0,
+            'Z0': pred_z0,
+            'Err Z0': relative_error_z0,
         })
-        
-    para_logs_agg = {}
-    for k in para_logs[0].keys():
-        arr = [p[k] for p in para_logs]
-        para_logs_agg[k] = format_uncertainty(np.mean(arr), np.std(arr))
-        
-    return para_logs_agg, loss_logs
+
+    return tab_logs, fig_logs
 
 
 # +
