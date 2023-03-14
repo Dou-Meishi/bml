@@ -28,7 +28,7 @@ import seaborn as sns
 # -
 
 TENSORDTYPE = torch.float64
-DEVICE = 'cpu'
+DEVICE = 'cuda:0'
 LOGROOTDIR = './outputs'
 
 
@@ -256,9 +256,13 @@ class FBSDE_BMLSolver(object):
 # # Benchmark of Func calc_loss
 
 # +
-test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
+test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=100))
 with torch.no_grad():
     t, X, Y, Z, dW = test_solver.obtain_XYZ()
+    
+test_solver.set_parameter('sigma_0', 0.3)
+test_solver.set_parameter('r', .1)
+test_solver.set_parameter('H', 200)
 
 terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_solver.fbsde.d
 running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*torch.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_solver.fbsde.d)**3)
@@ -272,14 +276,13 @@ assert martingale_error.abs().max() < 1e-15
 # # Loss of True Solutions
 
 # +
-optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
+optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=100))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('sigma_0', 0.4)
-optimal_solver.set_parameter('r', .0)
-optimal_solver.set_parameter('H', 50)
-optimal_solver.set_parameter('T', 1.)
+optimal_solver.set_parameter('sigma_0', 0.3)
+optimal_solver.set_parameter('r', .1)
+optimal_solver.set_parameter('H', 200)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
@@ -310,7 +313,7 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(3000):
+        for step in tqdm.trange(2000):
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -350,8 +353,9 @@ search_mesh = {
     'z_lr': [5e-3],
     'batch_size': [512], #, 1024],
     
-    'r': [0.],
-    'sigma_0': [0.4],
+    'r': [0.1],
+    'sigma_0': [0.3],
+    'H': [200],
 }
 
 res = []
@@ -360,7 +364,7 @@ for args in itertools.product(*search_mesh.values()):
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
-    tab_logs, fig_logs = solve_LongSin(n=4, repeat=10, **args)
+    tab_logs, fig_logs = solve_LongSin(n=100, repeat=5, **args)
     
     res.append({
         'args': args,
