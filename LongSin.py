@@ -164,7 +164,7 @@ class ZNet_FC3L(torch.nn.Module):
 class FBSDE_BMLSolver(object):
 
     def __init__(self, fbsde, dirac=False):
-        self.hidden_size = fbsde.n + 10
+        self.hidden_size = min(64, 1<<math.ceil(math.log2(fbsde.n+10)))
         self.batch_size = 512
         
         self.fbsde = fbsde
