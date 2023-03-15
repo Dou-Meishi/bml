@@ -63,15 +63,15 @@ def time_dir():
 # # Problem
 
 # Solve the fully coupled FBSDE
-#   \begin{equation*}
-#   \left\{
-#   \begin{aligned}
-#     X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
-#     Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
-#   \end{aligned}
-#   \right.
-#   \end{equation*}
-#   Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
+# \begin{equation*}
+# \left\{
+# \begin{aligned}
+#   X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
+#   Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
+# \end{aligned}
+# \right.
+# \end{equation*}
+# Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
 
 # # FBSDE
 
