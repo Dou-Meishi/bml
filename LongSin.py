@@ -258,7 +258,7 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # # Train
 
-def solve_LongSin(n, *, repeat=10, **solver_kws):
+def solve_LongSin(n, *, repeat=10, max_steps=2000, **solver_kws):
     tab_logs, fig_logs = [], []
     for epi in range(repeat):
         _solver = FBSDE_BMLSolver(FBSDE_LongSin(n=n))
@@ -271,7 +271,7 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(2000):
+        for step in tqdm.trange(max_steps)
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -305,6 +305,10 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
 # ## Search Hyperparameters
 
 # +
+STATEDIM = 1
+REPEATNUM = 2          # number of repeating an experiment
+MAXSTEPS = 20        # max gradient steps
+
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
     'y_lr': [5e-3], #, 5e-4, 5e-5],
@@ -321,8 +325,8 @@ for args in itertools.product(*search_mesh.values()):
     args = dict(zip(search_mesh.keys(), args))
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
-
-    tab_logs, fig_logs = solve_LongSin(n=100, repeat=5, **args)
+    
+    tab_logs, fig_logs = solve_LongSin(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
     
     res.append({
         'args': args,
