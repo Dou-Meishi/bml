@@ -302,6 +302,9 @@ def solve_FuSinCos(n, *, repeat=10, max_steps=2000, **solver_kws):
 
 # ## Search Hyperparameters
 
+log_dir = os.path.join(LOGROOTDIR, time_dir())
+os.makedirs(log_dir, exist_ok=True)
+
 # +
 STATEDIM = 1
 REPEATNUM = 2          # number of repeating an experiment
@@ -312,8 +315,6 @@ search_mesh = {
     'y_lr': [5e-3], #, 5e-4, 5e-5],
     'z_lr': [5e-3],
     'batch_size': [512], #, 1024],
-    
-
 }
 
 res = []
@@ -340,10 +341,6 @@ fig_logs = [pd.DataFrame(r['fig_logs']) for r in res]
 
 tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
 fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
-# -
-
-log_dir = os.path.join(LOGROOTDIR, time_dir())
-os.makedirs(log_dir, exist_ok=True)
 
 # +
 tab_logs.to_csv(os.path.join(log_dir, 'tab_logs.csv'), index=False)
@@ -352,6 +349,8 @@ print(f"tab_logs.csv saved to {log_dir}")
 fig_logs.to_csv(os.path.join(log_dir, 'fig_logs.csv'), index=False)
 print(f"fig_logs.csv saved to {log_dir}")
 # -
+
+# ## Result Analysis
 
 args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
 args_df = pd.concat([pd.DataFrame([r['args'] for r in res]), args_df], axis=1)
@@ -377,3 +376,6 @@ for i, j in itertools.product(range(c_figs), range(r_figs)):
 # -
 
 fig.savefig(os.path.join(log_dir, "fig.pdf"))
+print(f"fig.pdf saved to {log_dir}")
+
+print(f"Finished at {time_dir()}")
