@@ -307,8 +307,13 @@ def solve_LongSin(n, *, repeat=10, max_steps=2000, **solver_kws):
 
 # ## Search Hyperparameters
 
+# +
 log_dir = os.path.join(LOGROOTDIR, time_dir())
-os.makedirs(log_dir, exist_ok=True)
+os.makedirs(log_dir, exist_ok=False)
+
+os.makedirs(os.path.join(log_dir, "tab_logs"))
+os.makedirs(os.path.join(log_dir, "fig_logs"))
+os.makedirs(os.path.join(log_dir, "args_df"))
 
 # +
 STATEDIM = 1
@@ -326,7 +331,6 @@ search_mesh = {
     'H': [200],
 }
 
-res = []
 args_set = list(itertools.product(*search_mesh.values()))
 for i, args in enumerate(args_set):
     args = dict(zip(search_mesh.keys(), args))
@@ -335,48 +339,34 @@ for i, args in enumerate(args_set):
     
     print(f"EXP: [{i+1}/{len(args_set)}]")
     tab_logs, fig_logs = solve_LongSin(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
-    
-    res.append({
-        'args': args,
-        'tab_logs': tab_logs,
-        'fig_logs': fig_logs,
-    })
 
-# +
-tab_logs = [pd.DataFrame(r['tab_logs']) for r in res]
-fig_logs = [pd.DataFrame(r['fig_logs']) for r in res]
+    args_df = pd.DataFrame(tab_logs).drop(columns=['epi']).agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr))).to_frame().T
 
-tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
-fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
-
-# +
-tab_logs.to_csv(os.path.join(log_dir, 'tab_logs.csv'), index=False)
-print(f"tab_logs.csv saved to {log_dir}")
-
-fig_logs.to_csv(os.path.join(log_dir, 'fig_logs.csv'), index=False)
-print(f"fig_logs.csv saved to {log_dir}")
+    pd.DataFrame(fig_logs).to_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv"), index=False)
+    pd.DataFrame(tab_logs).to_csv(os.path.join(log_dir, "tab_logs", f"{i}.csv"), index=False)
+    pd.concat([pd.DataFrame([args]), args_df], axis=1).to_csv(os.path.join(log_dir, "args_df", f"{i}.csv"), index=False)
 # -
 
 # ## Result Analysis
 
-args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
-args_df = pd.concat([pd.DataFrame([r['args'] for r in res]), args_df], axis=1)
-args_df
-
+args_df = [pd.read_csv(os.path.join(log_dir, "args_df", f"{i}.csv")) for i in range(len(args_set))]
+args_df = pd.concat(args_df, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
-print(f"args_df.csv saved to {log_dir}")
+
+fig_logs = [pd.read_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv")) for i in range(len(args_set))]
+fig_logs = pd.concat(fig_logs, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 
 # +
 r_figs = 3
-c_figs = math.ceil(len(res)/r_figs)
+c_figs = math.ceil(len(args_set)/r_figs)
 fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
 if c_figs == 1:
     axes = axes.reshape(1, -1)
 
-fig_logs_gb = fig_logs.groupby('args')    
+fig_logs_gb = fig_logs.groupby('args')
 
 for i, j in itertools.product(range(c_figs), range(r_figs)):
-    if  i*r_figs + j >= len(res):
+    if  i*r_figs + j >= len(args_set):
         break
     sns.lineplot(data=fig_logs_gb.get_group(i*r_figs+j), x='step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
     axes[i,j].set_yscale('log')
