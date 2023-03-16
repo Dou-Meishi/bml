@@ -346,8 +346,8 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
 # +
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
-    'y_lr': [5e-3], #, 5e-4, 5e-5],
-    'z_lr': [5e-3],
+    'y_lr': [1e-2, 5e-3, 1e-3], #, 5e-4, 5e-5],
+    'z_lr': [5e-3, 1e-3, 5e-4],
     'batch_size': [512], #, 1024],
     
     'r': [0.],
@@ -357,7 +357,7 @@ search_mesh = {
 res = []
 for args in itertools.product(*search_mesh.values()):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
+    if abs(np.log10(args['y_lr']/args['z_lr'])) > 7.9:
         continue
 
     tab_logs, fig_logs = solve_LongSin(n=4, repeat=10, **args)
