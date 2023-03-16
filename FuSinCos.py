@@ -266,7 +266,10 @@ def solve_FuSinCos(n, *, repeat=10, max_steps=2000, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(max_steps)
+        
+        pbar = tqdm.trange(max_steps, leave=(epi==repeat-1))
+        pbar.set_description(f"REP: [{epi+1}/{repeat}]")
+        for step in pbar:
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -314,13 +317,16 @@ search_mesh = {
 }
 
 res = []
-for args in itertools.product(*search_mesh.values()):
+args_set = list(itertools.product(*search_mesh.values()))
+for i, args in enumerate(args_set):
     args = dict(zip(search_mesh.keys(), args))
     if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
         continue
 
 
+    print(f"EXP: [{i+1}/{len(args_set)}]")
     tab_logs, fig_logs = solve_FuSinCos(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
+
     
     res.append({
         'args': args,
