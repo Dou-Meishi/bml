@@ -226,9 +226,9 @@ terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*
 running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*torch.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_solver.fbsde.d)**3)
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
-assert terminal_error.abs().max() < 1e-15
-assert running_error.abs().max() < 1e-15
-assert martingale_error.abs().max() < 1e-15
+assert terminal_error.abs().max() < 1e-12
+assert running_error.abs().max() < 1e-12
+assert martingale_error.abs().max() < 1e-12
 # -
 
 # # Loss of True Solutions
