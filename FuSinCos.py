@@ -25,6 +25,10 @@ import pandas as pd
 import torch
 import tqdm
 import seaborn as sns
+
+# local files
+from yznets import *
+
 # -
 
 TENSORDTYPE = torch.float64
@@ -109,52 +113,6 @@ class FBSDE_FuSinCos(object):
         return torch.cos(t+x).unsqueeze(-1)
 
 
-# # Network
-
-# +
-class YNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, *, hidden_size):
-        super().__init__()
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m, bias=True)
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z)
-    
-    
-class ZNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, d, *, hidden_size):
-        super().__init__()
-        self.m = m
-        self.d = d
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m*d, bias=True),
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z).view(*x.shape[:-1], self.m, self.d)
-
-
-# -
 
 # # Solver
 
@@ -165,8 +123,8 @@ class FBSDE_BMLSolver(object):
         self.batch_size = 512
         
         self.fbsde = fbsde
-        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
-        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
+        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
+        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
         
         self.track_X_grad = False
         self.dirac = dirac
