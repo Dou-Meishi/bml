@@ -352,6 +352,7 @@ for i, args in enumerate(args_set):
 args_df = [pd.read_csv(os.path.join(log_dir, "args_df", f"{i}.csv")) for i in range(len(args_set))]
 args_df = pd.concat(args_df, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
+print(pd.DataFrame(args_df).reset_index())
 
 fig_logs = [pd.read_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv")) for i in range(len(args_set))]
 fig_logs = pd.concat(fig_logs, keys=range(len(args_set)), names=['args']).reset_index(level='args')
