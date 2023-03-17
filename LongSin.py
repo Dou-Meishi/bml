@@ -300,6 +300,7 @@ def solve_LongSin(n, *, repeat=10, max_steps=2000, **solver_kws):
             'Err Y0': relative_error_y0,
             'Z0': pred_z0,
             'Err Z0': relative_error_z0,
+            'loss': np.mean([r['loss'] for r in fig_logs if r['epi'] == epi])
         })
 
     return tab_logs, fig_logs
