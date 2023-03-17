@@ -326,10 +326,7 @@ search_mesh = {
 args_set = list(itertools.product(*search_mesh.values()))
 for i, args in enumerate(args_set):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
-        continue
-
-
+    
     print(f"EXP: [{i+1}/{len(args_set)}]")
 
     tab_logs, fig_logs = solve_FuSinCos(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
