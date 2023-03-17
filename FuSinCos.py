@@ -311,14 +311,16 @@ os.makedirs(os.path.join(log_dir, "args_df"))
 
 # +
 STATEDIM = 1
-REPEATNUM = 2          # number of repeating an experiment
-MAXSTEPS = 20        # max gradient steps
+REPEATNUM = 1          # number of repeating an experiment
+MAXSTEPS = 200        # max gradient steps
 
 search_mesh = {
-    'dirac': [False, True, 0.05], #, True],
-    'y_lr': [1e-3], #, 5e-4, 5e-5],
-    'z_lr': [5e-3],
+    'dirac': [False], #, True],
+    'y_lr': [1e-1], #, 5e-4, 5e-5],
+    'z_lr': [1e-2],
+
     'batch_size': [512], #, 1024],
+    'H': range(25, 225, 25)
 }
 
 args_set = list(itertools.product(*search_mesh.values()))
