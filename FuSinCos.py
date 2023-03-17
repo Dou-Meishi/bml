@@ -25,6 +25,10 @@ import pandas as pd
 import torch
 import tqdm
 import seaborn as sns
+
+# local files
+from yznets import *
+
 # -
 
 TENSORDTYPE = torch.float64
@@ -63,21 +67,23 @@ def time_dir():
 # # Problem
 
 # Solve the fully coupled FBSDE
-#   \begin{equation*}
-#   \left\{
-#   \begin{aligned}
-#     X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
-#     Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
-#   \end{aligned}
-#   \right.
-#   \end{equation*}
-#   Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
+# \begin{equation*}
+# \left\{
+# \begin{aligned}
+#   X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
+#   Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
+# \end{aligned}
+# \right.
+# \end{equation*}
+# Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
 
 # # FBSDE
 
 class FBSDE_FuSinCos(object):
     
-    def __init__(self):
+    def __init__(self, n=1):
+        assert n==1, "FuSinCos allow only n=1"
+
         self.H = 25
         self.T = 1.0
         self.n = 1
@@ -109,52 +115,6 @@ class FBSDE_FuSinCos(object):
         return torch.cos(t+x).unsqueeze(-1)
 
 
-# # Network
-
-# +
-class YNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, *, hidden_size):
-        super().__init__()
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m, bias=True)
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z)
-    
-    
-class ZNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, d, *, hidden_size):
-        super().__init__()
-        self.m = m
-        self.d = d
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m*d, bias=True),
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z).view(*x.shape[:-1], self.m, self.d)
-
-
-# -
 
 # # Solver
 
@@ -165,8 +125,8 @@ class FBSDE_BMLSolver(object):
         self.batch_size = 512
         
         self.fbsde = fbsde
-        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
-        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
+        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
+        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
         
         self.track_X_grad = False
         self.dirac = dirac
@@ -261,9 +221,9 @@ terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - torch.sin(test_solver.fb
 running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (Y[:-1]*(Z[:-1].squeeze(-1))-torch.cos(t[:-1]+X[:-1]))
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
-assert terminal_error.abs().max() < 1e-15
-assert running_error.abs().max() < 1e-15
-assert martingale_error.abs().max() < 1e-15
+assert terminal_error.abs().max() < 1e-12
+assert running_error.abs().max() < 1e-12
+assert martingale_error.abs().max() < 1e-12
 # -
 
 # # Loss of True Solutions
@@ -292,10 +252,11 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # # Train
 
-def solve_FuSinCos(*, repeat=10, **solver_kws):
+def solve_FuSinCos(n, *, repeat=10, max_steps=2000, **solver_kws):
+
     tab_logs, fig_logs = [], []
     for epi in range(repeat):
-        _solver = FBSDE_BMLSolver(FBSDE_FuSinCos())
+        _solver = FBSDE_BMLSolver(FBSDE_FuSinCos(n=n))
         
         for k in solver_kws:
             _solver.set_parameter(k, solver_kws[k])
@@ -305,7 +266,10 @@ def solve_FuSinCos(*, repeat=10, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(2000):
+        
+        pbar = tqdm.trange(max_steps, leave=(epi==repeat-1))
+        pbar.set_description(f"REP: [{epi+1}/{repeat}]")
+        for step in pbar:
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -331,6 +295,7 @@ def solve_FuSinCos(*, repeat=10, **solver_kws):
             'Err Y0': relative_error_y0,
             'Z0': pred_z0,
             'Err Z0': relative_error_z0,
+            'loss': np.mean([r['loss'] for r in fig_logs if r['epi'] == epi])
         })
 
     return tab_logs, fig_logs
@@ -339,69 +304,66 @@ def solve_FuSinCos(*, repeat=10, **solver_kws):
 # ## Search Hyperparameters
 
 # +
+log_dir = os.path.join(LOGROOTDIR, time_dir())
+os.makedirs(log_dir, exist_ok=False)
+
+os.makedirs(os.path.join(log_dir, "tab_logs"))
+os.makedirs(os.path.join(log_dir, "fig_logs"))
+os.makedirs(os.path.join(log_dir, "args_df"))
+
+# +
+STATEDIM = 1
+REPEATNUM = 2          # number of repeating an experiment
+MAXSTEPS = 20        # max gradient steps
+
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
     'y_lr': [1e-3], #, 5e-4, 5e-5],
     'z_lr': [5e-3],
     'batch_size': [512], #, 1024],
-
-    'H': list(range(25, 225, 25)),
 }
 
-res = []
-for args in itertools.product(*search_mesh.values()):
+args_set = list(itertools.product(*search_mesh.values()))
+for i, args in enumerate(args_set):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 1.9:
-        continue
-
-    tab_logs, fig_logs = solve_FuSinCos(repeat=10, **args)
     
-    res.append({
-        'args': args,
-        'tab_logs': tab_logs,
-        'fig_logs': fig_logs,
-    })
+    print(f"EXP: [{i+1}/{len(args_set)}]")
 
-# +
-tab_logs = [pd.DataFrame(r['tab_logs']) for r in res]
-fig_logs = [pd.DataFrame(r['fig_logs']) for r in res]
+    tab_logs, fig_logs = solve_FuSinCos(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
 
-tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
-fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
+    args_df = pd.DataFrame(tab_logs).drop(columns=['epi']).agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr))).to_frame().T
+
+    pd.DataFrame(fig_logs).to_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv"), index=False)
+    pd.DataFrame(tab_logs).to_csv(os.path.join(log_dir, "tab_logs", f"{i}.csv"), index=False)
+    pd.concat([pd.DataFrame([args]), args_df], axis=1).to_csv(os.path.join(log_dir, "args_df", f"{i}.csv"), index=False)
 # -
 
-log_dir = os.path.join(LOGROOTDIR, time_dir())
-os.makedirs(log_dir, exist_ok=True)
+# ## Result Analysis
 
-# +
-tab_logs.to_csv(os.path.join(log_dir, 'tab_logs.csv'), index=False)
-print(f"tab_logs.csv saved to {log_dir}")
-
-fig_logs.to_csv(os.path.join(log_dir, 'fig_logs.csv'), index=False)
-print(f"fig_logs.csv saved to {log_dir}")
-# -
-
-args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
-args_df = pd.concat([pd.DataFrame([r['args'] for r in res]), args_df], axis=1)
-args_df
-
+args_df = [pd.read_csv(os.path.join(log_dir, "args_df", f"{i}.csv")) for i in range(len(args_set))]
+args_df = pd.concat(args_df, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
-print(f"args_df.csv saved to {log_dir}")
+
+fig_logs = [pd.read_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv")) for i in range(len(args_set))]
+fig_logs = pd.concat(fig_logs, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 
 # +
 r_figs = 3
-c_figs = math.ceil(len(res)/r_figs)
+c_figs = math.ceil(len(args_set)/r_figs)
 fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
 if c_figs == 1:
     axes = axes.reshape(1, -1)
 
-fig_logs_gb = fig_logs.groupby('args')    
+fig_logs_gb = fig_logs.groupby('args')
 
 for i, j in itertools.product(range(c_figs), range(r_figs)):
-    if  i*r_figs + j >= len(res):
+    if  i*r_figs + j >= len(args_set):
         break
     sns.lineplot(data=fig_logs_gb.get_group(i*r_figs+j), x='step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
     axes[i,j].set_yscale('log')
 # -
 
 fig.savefig(os.path.join(log_dir, "fig.pdf"))
+print(f"fig.pdf saved to {log_dir}")
+
+print(f"Finished at {time_dir()}")
