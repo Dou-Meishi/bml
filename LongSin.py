@@ -32,7 +32,7 @@ from yznets import *
 # -
 
 TENSORDTYPE = torch.float64
-DEVICE = 'cuda:0'
+DEVICE = 'cpu'
 LOGROOTDIR = './outputs'
 
 
@@ -214,13 +214,13 @@ class FBSDE_BMLSolver(object):
 # # Benchmark of Func calc_loss
 
 # +
-test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=100))
+test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 with torch.no_grad():
     t, X, Y, Z, dW = test_solver.obtain_XYZ()
     
-test_solver.set_parameter('sigma_0', 0.3)
-test_solver.set_parameter('r', .1)
-test_solver.set_parameter('H', 200)
+test_solver.set_parameter('sigma_0', 0.4)
+test_solver.set_parameter('r', .0)
+test_solver.set_parameter('H', 50)
 
 terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_solver.fbsde.d
 running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*torch.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_solver.fbsde.d)**3)
@@ -234,13 +234,13 @@ assert martingale_error.abs().max() < 1e-12
 # # Loss of True Solutions
 
 # +
-optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=100))
+optimal_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('sigma_0', 0.3)
-optimal_solver.set_parameter('r', .1)
-optimal_solver.set_parameter('H', 200)
+optimal_solver.set_parameter('sigma_0', 0.4)
+optimal_solver.set_parameter('r', .0)
+optimal_solver.set_parameter('H', 50)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
@@ -316,19 +316,19 @@ os.makedirs(os.path.join(log_dir, "fig_logs"))
 os.makedirs(os.path.join(log_dir, "args_df"))
 
 # +
-STATEDIM = 1
+STATEDIM = 4
 REPEATNUM = 2          # number of repeating an experiment
-MAXSTEPS = 20        # max gradient steps
+MAXSTEPS = 200        # max gradient steps
 
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
-    'y_lr': [5e-3], #, 5e-4, 5e-5],
-    'z_lr': [5e-3],
+    'y_lr': [5e-2], #, 5e-4, 5e-5],
+    'z_lr': [5e-2],
     'batch_size': [512], #, 1024],
 
-    'r': [0.1],
-    'sigma_0': [0.3],
-    'H': [200],
+    'r': [0.],
+    'sigma_0': [0.4],
+    'H': [50],
 }
 
 args_set = list(itertools.product(*search_mesh.values()))
