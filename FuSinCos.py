@@ -233,22 +233,20 @@ optimal_solver = FBSDE_BMLSolver(FBSDE_FuSinCos())
 optimal_solver.ynet = optimal_solver.fbsde.get_Y
 optimal_solver.znet = optimal_solver.fbsde.get_Z
 
-optimal_solver.set_parameter('H', 25)
-optimal_solver.set_parameter('T', 1.)
-
-dirac_loss, lambd_loss, gamma_loss = [], [], []
-for _ in tqdm.trange(10):
-    t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
-    dirac_loss.append(optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item())
-    lambd_loss.append(optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item())
-    gamma_loss.append(optimal_solver.calc_loss(dirac=0.05, txyzw=(t, X, Y, Z, dW)).item())
-
-print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
-print("μ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
-print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
-
-
+res = []
+for H in range(25, 225, 25):
+    for epi in range(100):
+        t, X, Y, Z, dW = optimal_solver.obtain_XYZ()
+        res.append({'H': H, 'epi': epi, 'type': 'δ-BML',
+            'loss': optimal_solver.calc_loss(dirac=True, txyzw=(t, X, Y, Z, dW)).item(),})
+        res.append({'H': H, 'epi': epi, 'type': 'λ-BML',
+            'loss': optimal_solver.calc_loss(dirac=False, txyzw=(t, X, Y, Z, dW)).item(),})
+        res.append({'H': H, 'epi': epi, 'type': 'γ-BML',
+            'loss': optimal_solver.calc_loss(dirac=0.05, txyzw=(t, X, Y, Z, dW)).item(),})
 # -
+
+sns.lineplot(data=pd.DataFrame(res), x='H', y='loss', hue='type', errorbar=('ci',68))
+
 
 # # Train
 
