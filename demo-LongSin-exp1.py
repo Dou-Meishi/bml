@@ -31,8 +31,8 @@ import seaborn as sns
 import bml.config
 
 # change config before loading other modules
-TENSORDTYPE = bml.config.TENSORDTYPE = torch.float64
-DEVICE = bml.config.DEVICE = "cpu"
+TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
+DEVICE = bml.config.DEVICE = "cuda:0"
 
 from bml.utils import *
 from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
@@ -70,7 +70,7 @@ LOGROOTDIR = './outputs'
 test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
 
 with torch.no_grad():
-    dW = sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M,
+    dW = corrected_sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M,
                   dtype=TENSORDTYPE, device=DEVICE)
     t, X, Y, Z, dW = test_sde.calc_XYZ(test_sde.true_v, test_sde.true_u, dW)
     
@@ -78,9 +78,9 @@ terminal_error = test_sde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_s
 running_error = test_sde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_sde.r*Y[:-1]+.5*torch.exp(-3*test_sde.r*(test_sde.T-t[:-1]))*test_sde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_sde.d)**3)
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
-assert terminal_error.abs().max() < 1e-12
-assert running_error.abs().max() < 1e-12
-assert martingale_error.abs().max() < 1e-12
+assert terminal_error.abs().max() < 1e-6
+assert running_error.abs().max() < 1e-6
+assert martingale_error.abs().max() < 1e-6
 # -
 
 # # Loss of True Solutions
@@ -90,7 +90,7 @@ test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
-    dW = sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M, dtype=TENSORDTYPE, device=DEVICE)
+    dW = corrected_sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M, dtype=TENSORDTYPE, device=DEVICE)
 
     dirac_loss.append(test_sde.calc_Res(test_sde.calc_MC(*test_sde.calc_XYZ(
         test_sde.true_v, test_sde.true_u, dW)), dirac=True).item())
@@ -180,7 +180,7 @@ def solve(self, pbar):
     tab_logs.append({
         'Y0': pred_y0,
         'Err Y0': relative_error_y0,
-        'loss': np.mean([r['loss'] for r in fig_logs])
+        'loss': fig_logs[-1]['loss'],
     })
 
     return tab_logs, fig_logs
@@ -188,13 +188,17 @@ def solve(self, pbar):
 FBSDE_Solver.solve = solve
 # -
 
-sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=512, r=0., sigma_0=0.4)
-model = YZNet_FC3L(
-    n=sde.n, m=sde.m, d=sde.d,
-    hidden_size=min(64, 1 << math.ceil(math.log2(sde.n + 10))),
-).to(dtype=TENSORDTYPE, device=DEVICE)
-solver = FBSDE_Solver(sde, model, lr=5e-2, dirac=False, quad_rule='rectangle')
+sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=4096, r=0., sigma_0=0.4)
+model = YZNet_FC3L(n=sde.n, m=sde.m, d=sde.d, hidden_size=64).to(
+        dtype=TENSORDTYPE, device=DEVICE)
+solver = FBSDE_Solver(sde, model, lr=5e-3, dirac=False, quad_rule='trapezoidal')
 
-tab_logs, fig_logs = solver.solve(tqdm.trange(200))
+for _ in range(10):
+    tab_logs, fig_logs = solver.solve(tqdm.trange(200))
+    solver.lr *= 2**(-1./ 2)
 
-tab_logs
+print(tab_logs)
+
+plt.plot(pd.DataFrame(fig_logs).loss)
+plt.yscale('log')
+plt.show()
