@@ -321,7 +321,7 @@ ResCalcMixin.calc_MC_with_quadrature = calc_MC_with_quadrature
 
 # +
 for rule in ['rectangle', 'trapezoidal']:
-    sde = FBSDE_LongSin(n=4, T=1., N=50, M=128*scale)
+    sde = FBSDE_LongSin(n=4, T=1., N=50, M=1024)
     dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
     t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
     empirical_var = sde.calc_MC_with_quadrature(
@@ -395,3 +395,14 @@ for i, ax in enumerate(axs):
     ax.legend()
 
 plt.show()
+# -
+
+# ## Conclusion of Choice III
+
+# In conclusion, we have examined the convergence behavior of the residual loss of the true solution with respect to the time step size and the number of Monte Carlo samples for a general type of fully coupled FBSDEs. Our observations reveal that the residual loss of FBSDEs behaves similarly to their SDE counterparts. Our findings are as follows:
+#
+# 1. The discrete residual loss of the true solution to the FBSDE is non-zero, but it approaches zero as the time step used for discretization approaches zero.
+#
+# 2. Monte Carlo methods can estimate the residual loss using sample paths of the Brownian motion. Larger sample sizes lead to smaller variances of the residual loss, while the mean value remains unaffected.
+#
+# 3. The "manually forcing orthogonality" technique used in SDEs can also be applied to FBSDEs.
