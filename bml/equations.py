@@ -16,13 +16,14 @@ class FBSDE_LongSin(object):
         self.r = r
         self.sigma_0 = sigma_0
 
-        self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
+        self.x0 = .5*np.pi*torch.ones(self.n, dtype=TENSORDTYPE, device=DEVICE)
         
     def b(self, t, x, y, z):
         return 0.*x
     
     def sigma(self, t, x, y, z):
-        return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
+        return self.sigma_0 * y.unsqueeze(-1) * torch.eye(
+            self.d, dtype=TENSORDTYPE, device=DEVICE)
     
     def f(self, t, x, y, z):
         return -self.r*y + .5*torch.exp(-3*self.r*(self.T-t))*self.sigma_0**2*(10/self.n*torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
