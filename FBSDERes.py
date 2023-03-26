@@ -342,8 +342,6 @@ plt.title("when different integrators are applied")
 # Because n normal r.v. can be viewed as a n-dimensional normal r.v., the above problem is equivalent to generate $M$ samples of $nN$ i.i.d. real valued normal variables $\{\epsilon_u(\omega_r)\}_{\substack{0\leq u\leq nN-1 \\ 0\leq r\leq M-1}}$ such that
 # $$ \overline{\operatorname{\mathbb{E}}}_r  \epsilon_u(\omega_r)=0,\quad \overline{\operatorname{\mathbb{E}}}_r\epsilon_u(\omega_r)\epsilon_v(\omega_r)=h\delta_{uv}.$$
 # This is again equivalent to forcing $\{\epsilon_u, 0\leq u\leq nN\}$ to be an orthogonal vector basis of $\mathbb{R}^M$, where we manually add the $\epsilon_{nN} = \mathbb{1}_m$, which is the all-$1$ vector. **Hence, we should have $M \geq nN+1$ to achieve this.**
-#
-# *TODO.* Maybe we could analytically find a $(nN+1)\times nN$ matrix satisfying the above conditions.
 
 # +
 # Create empty arrays to store the results
@@ -395,6 +393,68 @@ for i, ax in enumerate(axs):
     ax.legend()
 
 plt.show()
+
+# +
+# Create empty arrays to store the results
+sampled_var = []
+corrected_var = []
+sigma_values = [0.4, 0.1]
+M_scales = [1, 2, 4, 8]
+
+# Iterate through M_scales
+for scale in M_scales:
+    M = 256 * scale
+    sampled_var_M = []
+    corrected_var_M = []
+
+    for sigma in sigma_values:
+        sampled_var_sigma = []
+        corrected_var_sigma = []
+
+        for i in tqdm.trange(10):
+            # Sample dW and calculate empirical variance for the sampled dW
+            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
+            t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
+            empirical_var = sde.calc_MC_with_quadrature(
+                t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
+            sampled_var_sigma.append(empirical_var.cpu().numpy())
+
+            # Sample corrected dW and calculate empirical variance for the corrected dW
+            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
+            t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
+            empirical_var = sde.calc_MC_with_quadrature(
+                t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
+            corrected_var_sigma.append(empirical_var.cpu().numpy())
+        
+        sampled_var_M.append(sampled_var_sigma)
+        corrected_var_M.append(corrected_var_sigma)
+
+    sampled_var.append(sampled_var_M)
+    corrected_var.append(corrected_var_M)
+
+# Calculate the mean and standard deviation of each line
+sampled_mean = np.mean(sampled_var, axis=2)
+sampled_std = np.std(sampled_var, axis=2)
+corrected_mean = np.mean(corrected_var, axis=2)
+corrected_std = np.std(corrected_var, axis=2)
+
+# Create the figure with multiple rows and columns of subplots
+fig, axs = plt.subplots(len(M_scales), len(sigma_values), figsize=(8, 3 * len(M_scales)))
+
+for row, M_scale in enumerate(M_scales):
+    for col, sigma in enumerate(sigma_values):
+        ax = axs[row, col]
+        sampled_line = ax.plot(sampled_mean[row, col], label='sampled')
+        ax.fill_between(range(len(sampled_mean[row, col])), sampled_mean[row, col] - sampled_std[row, col], sampled_mean[row, col] + sampled_std[row, col], alpha=0.2)
+        corrected_line = ax.plot(corrected_mean[row, col], label='corrected')
+        ax.fill_between(range(len(corrected_mean[row, col])), corrected_mean[row, col] - corrected_std[row, col], corrected_mean[row, col] + corrected_std[row, col], alpha=0.2)
+        ax.set_title(f'M = {256 * M_scale}, $\\sigma_0$ = {sigma}')
+        ax.legend()
+
+plt.tight_layout()
+plt.show()
 # -
 
 # ## Conclusion of Choice III
@@ -406,3 +466,71 @@ plt.show()
 # 2. Monte Carlo methods can estimate the residual loss using sample paths of the Brownian motion. Larger sample sizes lead to smaller variances of the residual loss, while the mean value remains unaffected.
 #
 # 3. The "manually forcing orthogonality" technique used in SDEs can also be applied to FBSDEs.
+
+# ## A very interesting trend
+
+# It has been observed that when the sample size approaches zero while applying the forcing orthogonality trick, the residual loss mean converges to zero even if the time step is not. Additionally, the variance is very small.
+#
+# Without formal mathematical proof, it is hypothesized that this occurs because the residual loss is uniformly distributed in all directions. When dW is directly sampled, the loss is measured in random directions and lengths. However, with the forcing orthogonality trick, the directions are orthogonal and fixed in length. When the sample size is large, all directions are covered, making the trick unnecessary.
+
+# +
+# Create empty arrays to store the results
+sampled_var = []
+corrected_var = []
+sigma_values = [0.4, 0.1]
+M_scales = [1, 2, 4, 8]
+
+# Iterate through M_scales
+for scale in M_scales:
+    M = 256 // scale
+    sampled_var_M = []
+    corrected_var_M = []
+
+    for sigma in sigma_values:
+        sampled_var_sigma = []
+        corrected_var_sigma = []
+
+        for i in tqdm.trange(10):
+            # Sample dW and calculate empirical variance for the sampled dW
+            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
+            t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
+            empirical_var = sde.calc_MC_with_quadrature(
+                t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
+            sampled_var_sigma.append(empirical_var.cpu().numpy())
+
+            # Sample corrected dW and calculate empirical variance for the corrected dW
+            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
+            t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
+            empirical_var = sde.calc_MC_with_quadrature(
+                t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
+            corrected_var_sigma.append(empirical_var.cpu().numpy())
+        
+        sampled_var_M.append(sampled_var_sigma)
+        corrected_var_M.append(corrected_var_sigma)
+
+    sampled_var.append(sampled_var_M)
+    corrected_var.append(corrected_var_M)
+
+# Calculate the mean and standard deviation of each line
+sampled_mean = np.mean(sampled_var, axis=2)
+sampled_std = np.std(sampled_var, axis=2)
+corrected_mean = np.mean(corrected_var, axis=2)
+corrected_std = np.std(corrected_var, axis=2)
+
+# Create the figure with multiple rows and columns of subplots
+fig, axs = plt.subplots(len(M_scales), len(sigma_values), figsize=(8, 3 * len(M_scales)))
+
+for row, M_scale in enumerate(M_scales):
+    for col, sigma in enumerate(sigma_values):
+        ax = axs[row, col]
+        sampled_line = ax.plot(sampled_mean[row, col], label='sampled')
+        ax.fill_between(range(len(sampled_mean[row, col])), sampled_mean[row, col] - sampled_std[row, col], sampled_mean[row, col] + sampled_std[row, col], alpha=0.2)
+        corrected_line = ax.plot(corrected_mean[row, col], label='corrected')
+        ax.fill_between(range(len(corrected_mean[row, col])), corrected_mean[row, col] - corrected_std[row, col], corrected_mean[row, col] + corrected_std[row, col], alpha=0.2)
+        ax.set_title(f'M = {256 // M_scale}, $\\sigma_0$ = {sigma}')
+        ax.legend()
+
+plt.tight_layout()
+plt.show()
