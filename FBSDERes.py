@@ -164,15 +164,15 @@ class ResCalcMixin(object):
 
 class FBSDE_LongSin(ResCalcMixin):
     
-    def __init__(self, n, *, T=None, N=None, M=None):
+    def __init__(self, n, *, T=None, N=None, M=None, r=0., sigma_0=0.4):
         self.n = n
         self.m = 1
         self.d = self.n
         
         self.T, self.N, self.M = T, N, M
 
-        self.r = 0.
-        self.sigma_0 = 0.4
+        self.r = r
+        self.sigma_0 = sigma_0
 
         self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
         
@@ -349,31 +349,32 @@ plt.title("when different integrators are applied")
 # Create empty arrays to store the results
 sampled_var = []
 corrected_var = []
+sigma_values = [0.4, 0.1]
 
-# Repeat the procedure 10 times for each value of gamma
-for gamma in [1.99, -1.99]:
-    sampled_var_gamma = []
-    corrected_var_gamma = []
+# Repeat the procedure 10 times for each value of sigma
+for sigma in sigma_values:
+    sampled_var_sigma = []
+    corrected_var_sigma = []
     for i in tqdm.trange(10):
         # Sample dW and calculate empirical variance for the sampled dW
-        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256)
+        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256, sigma_0=sigma)
         dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
         empirical_var = sde.calc_MC_with_quadrature(
             t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
-        sampled_var_gamma.append(empirical_var.cpu().numpy())
+        sampled_var_sigma.append(empirical_var.cpu().numpy())
         
         # Sample corrected dW and calculate empirical variance for the corrected dW
-        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256)
+        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256, sigma_0=sigma)
         dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
         empirical_var = sde.calc_MC_with_quadrature(
             t, X, Y, Z, dW, rule=rule).squeeze(-1).var(dim=-1)
-        corrected_var_gamma.append(empirical_var.cpu().numpy())
+        corrected_var_sigma.append(empirical_var.cpu().numpy())
     
-    # Append the results for this value of gamma to the overall arrays
-    sampled_var.append(sampled_var_gamma)
-    corrected_var.append(corrected_var_gamma)
+    # Append the results for this value of sigma to the overall arrays
+    sampled_var.append(sampled_var_sigma)
+    corrected_var.append(corrected_var_sigma)
 
 # Calculate the mean and standard deviation of each line
 sampled_mean = np.mean(sampled_var, axis=1)
@@ -385,12 +386,12 @@ corrected_std = np.std(corrected_var, axis=1)
 fig, axs = plt.subplots(1, 2, figsize=(10, 4))
 
 for i, ax in enumerate(axs):
-    gamma = [1.99, -1.99][i]
+    sigma = sigma_values[i]
     sampled_line = ax.plot(sampled_mean[i], label='sampled')
     ax.fill_between(range(len(sampled_mean[i])), sampled_mean[i] - sampled_std[i], sampled_mean[i] + sampled_std[i], alpha=0.2)
     corrected_line = ax.plot(corrected_mean[i], label='corrected')
     ax.fill_between(range(len(corrected_mean[i])), corrected_mean[i] - corrected_std[i], corrected_mean[i] + corrected_std[i], alpha=0.2)
-    ax.set_title(f'Gamma = {gamma}')
+    ax.set_title(f'$\\sigma_0$ = {sigma}')
     ax.legend()
 
 plt.show()
