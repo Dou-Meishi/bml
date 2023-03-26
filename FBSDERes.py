@@ -27,14 +27,16 @@ import torch
 import tqdm
 import seaborn as sns
 
+# +
 # local files
-from utils import *
-from yznets import *
+import bml.config
+
+TENSORDTYPE = bml.config.TENSORDTYPE = torch.float64
+DEVICE = bml.config.DEVICE = "cpu"
+
+from bml.utils import *
+from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
 # -
-
-TENSORDTYPE = torch.float64
-DEVICE = "cpu"
-
 
 # # Notation
 
@@ -98,105 +100,8 @@ DEVICE = "cpu"
 # Now we assume that we are lucky enough such that $v^\theta$ and $u^\theta$ exactly match the true form $v$ and $u$. Denote by $\theta_*$ the corresponding hyperparameter. We want to study the behavior of $\mathit{Res}(\theta_*;h,M)$ as $h\to 0$ and $M\to\infty$. Note that if these integrals can be obtained without discretization errors, then $\mathit{Res}(\theta_*)$ is strictly zero. Thus, all we want to do is to verify the limit equation
 # $$ \lim_{\substack{h\to0\\M\to\infty}}\mathit{Res}(\theta_*;h,M) = \mathit{Res}(\theta_*).$$
 
-class ResCalcMixin(object):
-    
-    @property
-    def h(self):
-        return self.T / self.N
-    
-    @property
-    def t(self):
-        return self.h * torch.arange(
-            1 + self.N, dtype=TENSORDTYPE, device=DEVICE
-        ).view(-1,1,1).expand(-1, self.M, 1)
-
-    def get_weight_mu(self, dirac):
-        r'''return a weight vector w.r.t. time dimension.
-
-        - if self.dirac is True, only the first weight is 1 and all others are zero.
-        - if self.dirac is False, return the uniform weight.
-        - if self.dirac is a real number, return the decay weight with rate exp(-self.dirac).
-        '''
-        if dirac is True:
-            weight = torch.cat((torch.tensor([1.0]), torch.zeros(self.N-1)), dim=0)
-        elif dirac is False:
-            weight = torch.ones(self.N) / float(self.N)
-        else:
-            gamma = float(dirac)
-            weight = (1-np.exp(-gamma))/(1-np.exp(-gamma*self.N))*torch.exp(
-                -gamma*torch.arange(self.N))
-        return weight.view(-1,1,1).expand(-1, self.M, 1).to(
-            dtype=TENSORDTYPE, device=DEVICE)
-
-    def calc_Res(self, mc, dirac):
-        r'''Average MC error to obain Res.'''
-        return torch.sum(mc * mc * self.get_weight_mu(dirac)) / mc.shape[1]
-
-    def calc_MC(self, t, X, Y, Z, dW):
-        r'''Evaluate the MC error of given processes.'''
-        return Y[:-1] - (self.g(X[-1:]) + self.h * re_cumsum(
-            self.f(t[:-1], X[:-1], Y[:-1], Z[:-1]), dim=0
-        ) - re_cumsum(Z[:-1] @ dW.unsqueeze(-1), dim=0).squeeze(-1))
-
-    def calc_XYZ(self, v, u, dW):
-        r'''Calculate $(X, Y, Z)$ through Choice III'''
-        t = self.t
-        X = torch.empty(1+self.N, dW.shape[1], self.n, 
-                        dtype=TENSORDTYPE, device=DEVICE)
-        Y = torch.empty(1+self.N, dW.shape[1], self.m, 
-                        dtype=TENSORDTYPE, device=DEVICE)
-        Z = torch.empty(1+self.N, dW.shape[1], self.m, self.d,
-                        dtype=TENSORDTYPE, device=DEVICE)
-
-        X[0] = self.x0
-        Y[0] = v(t[0], X[0])
-        Z[0] = u(t[0], X[0])
-        for i in range(self.N):
-            with torch.no_grad():
-                X[i+1] = X[i] + self.h * self.b(t[i], X[i], Y[i], Z[i]) + (
-                    self.sigma(t[i], X[i], Y[i], Z[i]) @ dW[i].unsqueeze(-1)
-                ).squeeze(-1)
-            Y[i+1] = v(t[i+1], X[i+1])
-            Z[i+1] = u(t[i+1], X[i+1])
-        
-        return t, X, Y, Z, dW
-
-
-class FBSDE_LongSin(ResCalcMixin):
-    
-    def __init__(self, n, *, T=None, N=None, M=None, r=0., sigma_0=0.4):
-        self.n = n
-        self.m = 1
-        self.d = self.n
-        
-        self.T, self.N, self.M = T, N, M
-
-        self.r = r
-        self.sigma_0 = sigma_0
-
-        self.x0 = .5*np.pi*torch.ones(self.n).to(device=DEVICE, dtype=TENSORDTYPE)
-        
-    def b(self, t, x, y, z):
-        return 0.*x
-    
-    def sigma(self, t, x, y, z):
-        return self.sigma_0 * y.unsqueeze(-1) * torch.eye(self.d).to(device=DEVICE, dtype=TENSORDTYPE)
-    
-    def f(self, t, x, y, z):
-        return -self.r*y + .5*torch.exp(-3*self.r*(self.T-t))*self.sigma_0**2*(10/self.n*torch.sum(torch.sin(x), dim=-1, keepdim=True))**3
-    
-    def g(self, x):
-        return 10/self.n*torch.sum(torch.sin(x), dim=-1, keepdim=True)
-    
-    def true_v(self, t, x):
-        return 10/self.n*torch.exp(-self.r*(self.T-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)
-
-    def true_u(self, t, x):
-        return self.sigma_0*100/self.n**2*(torch.exp(-2*self.r*(self.T-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
-
-
 # +
-sde = FBSDE_LongSin(n=4, T=1., N=50, M=512)
+sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=512)
 dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
 t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
 mc = sde.calc_MC(t, X, Y, Z, dW)
@@ -229,7 +134,7 @@ scale_values = [1, 2, 4, 8]
 for scale in tqdm.tqdm(scale_values):
     variances = []
     for i in range(n_runs):
-        sde = FBSDE_LongSin(n=4, T=1., N=50*scale, M=512)
+        sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50*scale, M=512)
         dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
 
@@ -262,7 +167,7 @@ fig, axs = plt.subplots(2, 2, figsize=(10, 8))
 for i, scale in enumerate(scale_values):
     variances = []
     for j in range(n_runs):
-        sde = FBSDE_LongSin(n=4, T=1., N=50, M=128*scale)
+        sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=128*scale)
         dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
 
@@ -317,11 +222,11 @@ def calc_MC_with_quadrature(self, t, X, Y, Z, dW, *, rule='rectangle'):
     else:
         raise ValueError(f"Unrecognized rule {rule}")
         
-ResCalcMixin.calc_MC_with_quadrature = calc_MC_with_quadrature
+FBSDE_LongSin_ResCalc.calc_MC_with_quadrature = calc_MC_with_quadrature
 
 # +
 for rule in ['rectangle', 'trapezoidal']:
-    sde = FBSDE_LongSin(n=4, T=1., N=50, M=1024)
+    sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=1024)
     dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
     t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
     empirical_var = sde.calc_MC_with_quadrature(
@@ -355,7 +260,7 @@ for sigma in sigma_values:
     corrected_var_sigma = []
     for i in tqdm.trange(10):
         # Sample dW and calculate empirical variance for the sampled dW
-        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256, sigma_0=sigma)
+        sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=256, sigma_0=sigma)
         dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
         empirical_var = sde.calc_MC_with_quadrature(
@@ -363,7 +268,7 @@ for sigma in sigma_values:
         sampled_var_sigma.append(empirical_var.cpu().numpy())
         
         # Sample corrected dW and calculate empirical variance for the corrected dW
-        sde = FBSDE_LongSin(n=4, T=1., N=50, M=256, sigma_0=sigma)
+        sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=256, sigma_0=sigma)
         dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
         t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
         empirical_var = sde.calc_MC_with_quadrature(
@@ -413,7 +318,7 @@ for scale in M_scales:
 
         for i in tqdm.trange(10):
             # Sample dW and calculate empirical variance for the sampled dW
-            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=M, sigma_0=sigma)
             dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
             t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
             empirical_var = sde.calc_MC_with_quadrature(
@@ -421,7 +326,7 @@ for scale in M_scales:
             sampled_var_sigma.append(empirical_var.cpu().numpy())
 
             # Sample corrected dW and calculate empirical variance for the corrected dW
-            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=M, sigma_0=sigma)
             dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
             t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
             empirical_var = sde.calc_MC_with_quadrature(
@@ -492,7 +397,7 @@ for scale in M_scales:
 
         for i in tqdm.trange(10):
             # Sample dW and calculate empirical variance for the sampled dW
-            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=M, sigma_0=sigma)
             dW = sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
             t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
             empirical_var = sde.calc_MC_with_quadrature(
@@ -500,7 +405,7 @@ for scale in M_scales:
             sampled_var_sigma.append(empirical_var.cpu().numpy())
 
             # Sample corrected dW and calculate empirical variance for the corrected dW
-            sde = FBSDE_LongSin(n=4, T=1., N=50, M=M, sigma_0=sigma)
+            sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=M, sigma_0=sigma)
             dW = corrected_sample_dW(sde.h, sde.n, sde.N, sde.M, dtype=TENSORDTYPE, device=DEVICE)
             t, X, Y, Z, dW = sde.calc_XYZ(sde.true_v, sde.true_u, dW)
             empirical_var = sde.calc_MC_with_quadrature(
