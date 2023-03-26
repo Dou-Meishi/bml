@@ -25,9 +25,6 @@ import pandas as pd
 import torch
 import tqdm
 import seaborn as sns
-import lightning.pytorch as pl
-
-from torch.utils.data import TensorDataset, DataLoader
 
 # +
 # local files
@@ -124,7 +121,7 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 #
 # 2. *Err Y0*. This is the relative error of the predicted $Y_0$.
 
-class FBSDE_Solver(pl.LightningModule):
+class FBSDE_Solver(object):
 
     def __init__(self, sde, model, *, lr, dirac, quad_rule='rectangle'):
         super().__init__()
@@ -134,23 +131,16 @@ class FBSDE_Solver(pl.LightningModule):
         self.dirac = dirac
         self.quad_rule = quad_rule
 
-    def training_step(self, batch, batch_idx):
-        data = sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M,
-                        dtype=TENSORDTYPE, device=DEVICE)
-        loss = self.calc_loss(self.model, self.sde, data, 
-                              rule=self.quad_rule, dirac=self.dirac)
-        self.log('train_loss', loss, 
-                 on_step=True, prog_bar=True, logger=True)
-        return loss
-
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         return optimizer
 
-    def calc_loss(self, model, sde, data, *, rule, dirac):
-        data = sde.calc_XYZ(model.ynet, model.znet, data)
-        data = sde.calc_MC(*data, rule=rule)
-        loss = sde.calc_Res(data, dirac=dirac)
+    def calc_loss(self):
+        data = sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M,
+                        dtype=TENSORDTYPE, device=DEVICE)
+        data = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
+        data = self.sde.calc_MC(*data, rule=self.quad_rule)
+        loss = self.sde.calc_Res(data, dirac=self.dirac)
         return loss
     
     def calc_metric_y0(self):
@@ -164,6 +154,40 @@ class FBSDE_Solver(pl.LightningModule):
 # # Train
 
 # +
+def solve(self, pbar):
+    tab_logs, fig_logs = [], []
+
+    optimizer = self.configure_optimizers()
+    self.model.train()
+    optimizer.zero_grad()
+
+    for step in pbar:
+        loss = self.calc_loss()
+
+        fig_logs.append({
+            'step': step,
+            'loss': loss.item(),
+        })
+
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+    self.model.eval()
+    with torch.no_grad():
+        pred_y0, relative_error_y0 = self.calc_metric_y0()
+
+    tab_logs.append({
+        'Y0': pred_y0,
+        'Err Y0': relative_error_y0,
+        'loss': np.mean([r['loss'] for r in fig_logs])
+    })
+
+    return tab_logs, fig_logs
+
+FBSDE_Solver.solve = solve
+# -
+
 sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=512, r=0., sigma_0=0.4)
 model = YZNet_FC3L(
     n=sde.n, m=sde.m, d=sde.d,
@@ -171,14 +195,6 @@ model = YZNet_FC3L(
 ).to(dtype=TENSORDTYPE, device=DEVICE)
 solver = FBSDE_Solver(sde, model, lr=5e-2, dirac=False, quad_rule='rectangle')
 
-# define a fake dataloader to fiddle with pytorch lightning
-dataloader = DataLoader(TensorDataset(torch.zeros(200, 1)))
-trainer = pl.Trainer(max_epochs=1)
+tab_logs, fig_logs = solver.solve(tqdm.trange(200))
 
-trainer.fit(solver, train_dataloaders=dataloader)
-
-# Evaluating
-pred_y0, error_percentage = solver.calc_metric_y0()
-print(f"Predicted y0: {pred_y0:.5f}")
-print(f"True y0: {sde.true_v(sde.t[0, 0], sde.x0).item():.5f}")
-print(f"Error: {error_percentage:.2f}%")
+tab_logs
