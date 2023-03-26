@@ -45,20 +45,30 @@ def force_orthogonal(A):
     return B @ eigvecs @ D_half_inv
 
 
-def generate_orth_vecs(m, n, *args, **kws):
+def _generate_orth_vecs(m, n, *args, **kws):
     r'''return n orthogonal $\mathbb{R}^m$ vectors as
     [e1, e2, ..., en] and ensure ei is orthogonal to
     the all-1 vector in $\mathbb{R}^m$.
 
     Require m >= n+1
     '''
-    assert m >= n + 1, "Require m >= n + 1"
-    if n > 10**3:
-        warnings.warn(f"You're trying to manipulating very large matrix {m} by {n}")
+    # assert m >= n + 1, "Require m >= n + 1"
+    # if n > 10**3:
+    #     warnings.warn(f"You're trying to manipulating very large matrix {m} by {n}")
 
     A = torch.randn(m, n+1, *args, **kws)
     A[:, 0] = 1.
     return torch.linalg.qr(A)[0][:, 1:]
+
+
+def generate_orth_vecs(m, n, *args, **kws):
+    r'''Handle the case of m <= n by dividing and concatenating outputs'''
+    if m > n:
+        return _generate_orth_vecs(m, n, *args, **kws)
+    k, r = divmod(n, m-1)
+    return torch.cat([
+        _generate_orth_vecs(m, m-1, *args, **kws) for _ in range(k)
+    ] + [_generate_orth_vecs(m, r, *args, **kws)], dim=1)
 
 
 def corrected_sample_dW(h, n, N, M, *args, **kws):
