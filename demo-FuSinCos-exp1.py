@@ -190,17 +190,23 @@ class Solver_FuSinCos(ResSolver):
         for step in range(max_steps):
             loss = self.calc_loss()
 
-            fig_logs.append({
-                'step': step,
-                'loss': loss.item(),
-            })
-
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
             
             pbar.update(1)
             pbar.set_postfix_str(f"Loss: {loss.item():.4f}")
+
+            self.model.eval()
+            with torch.no_grad():
+                pred_y0, relative_error_y0 = self.calc_metric_y0()
+
+            fig_logs.append({
+                'step': step,
+                'Y0': pred_y0,
+                'val loss': relative_error_y0,
+                'loss': loss.item(),
+            })
 
         self.model.eval()
         with torch.no_grad():
@@ -214,8 +220,8 @@ class Solver_FuSinCos(ResSolver):
             'averY': averY,
             'averZ': averZ,
             'dist': dist,
-            'loss': fig_logs[-1]['loss'],
             'val loss': relative_error_y0,
+            'loss': fig_logs[-1]['loss'],
         })
 
         return tab_logs, fig_logs
@@ -243,9 +249,9 @@ params = {
         'correction': False,
     },
     'trainer': {
-        'max_epoches': 9,
-        'steps_per_epoch': 200,
-        'lr_decay_per_epoch': 0.5,
+        'max_epoches': 1,
+        'steps_per_epoch': 99,
+        'lr_decay_per_epoch': 0.1,
         
         # these lr are used at the first serveral epoches
         'warm_up_lr': [],
@@ -305,8 +311,34 @@ fig_logs.to_csv(os.path.join(log_dir, "fig_logs.csv"), index=False)
 
 print(tab_logs)
 
-# +
-plt.plot(fig_logs.loss)
-plt.yscale('log')
+print(f"Results saved to {log_dir}")
+
+# # Plotting
+
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
+
+# Plot the running mean of the loss
+ax1.plot(running_mean(fig_logs.loss.values, 5))
+ax1.set_yscale('log')
+ax1.set_xlabel('Step')
+ax1.set_ylabel('Loss')
+ax1.set_title('Training loss')
+
+# Plot the predicted Y0 and true Y0
+ax2.plot(fig_logs.Y0, label='Predicted Y0')
+ax2.plot([sde.true_y0.item()]*len(fig_logs.Y0), label='True Y0')
+ax2.set_xlabel('Step')
+ax2.set_ylabel('Y0')
+ax2.set_title('Y0 prediction')
+ax2.legend()
+
+# Plot the relative error of Y0
+ax3.plot(.01*fig_logs['val loss'])
+ax3.set_yscale('log')
+ax3.set_xlabel('Step')
+ax3.set_ylabel('Error')
+ax3.set_title('Relative error of Y0 prediction')
+
+fig.savefig(os.path.join(log_dir, 'fig.pdf'))
 
 plt.show()
