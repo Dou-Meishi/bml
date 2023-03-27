@@ -25,6 +25,10 @@ import pandas as pd
 import torch
 import tqdm
 import seaborn as sns
+
+# local files
+from yznets import *
+
 # -
 
 TENSORDTYPE = torch.float64
@@ -63,15 +67,15 @@ def time_dir():
 # # Problem
 
 # Solve the fully coupled FBSDE
-#   \begin{equation*}
-#   \left\{
-#   \begin{aligned}
-#     X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
-#     Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
-#   \end{aligned}
-#   \right.
-#   \end{equation*}
-#   Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
+# \begin{equation*}
+# \left\{
+# \begin{aligned}
+#   X_t &= x_0 + \int_0^tb(s,X_s,Y_s,Z_s)\,ds + \int_0^t\sigma(s,X_s,Y_s,Z_s)\,dW_s,\\
+#   Y_t &= g(X_T) + \int_t^Tf(s,X_s,Y_s,Z_s)\,ds - \int_t^TZ_s\,dW_s.
+# \end{aligned}
+# \right.
+# \end{equation*}
+# Here, $X, Y, Z$ value in $\mathbb{R}^n, \mathbb{R}^m,\mathbb{R}^{m\times d}$.
 
 # # FBSDE
 
@@ -112,64 +116,18 @@ class FBSDE_LongSin(object):
         return self.sigma_0*100/self.n**2*(torch.exp(-2*self.r*(self.dt*self.H-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
 
 
-# # Network
-
-# +
-class YNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, *, hidden_size):
-        super().__init__()
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m, bias=True)
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z)
-    
-    
-class ZNet_FC3L(torch.nn.Module):
-    
-    def __init__(self, n, m, d, *, hidden_size):
-        super().__init__()
-        self.m = m
-        self.d = d
-        
-        self.fcnet = torch.nn.Sequential(
-            torch.nn.Linear(1+n, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, hidden_size, bias=True),
-            torch.nn.ReLU(),
-            torch.nn.Linear(hidden_size, m*d, bias=True),
-        )
-        
-        self.to(dtype=TENSORDTYPE, device=DEVICE)
-        
-    def forward(self, t, x):
-        z = torch.cat([t, x], dim=-1)
-        return self.fcnet(z).view(*x.shape[:-1], self.m, self.d)
-
-
-# -
 
 # # Solver
 
 class FBSDE_BMLSolver(object):
 
     def __init__(self, fbsde, dirac=False):
-        self.hidden_size = fbsde.n + 10
+        self.hidden_size = min(64, 1<<math.ceil(math.log2(fbsde.n+10)))
         self.batch_size = 512
         
         self.fbsde = fbsde
-        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size)
-        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size)
+        self.ynet = YNet_FC3L(self.fbsde.n, self.fbsde.m, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
+        self.znet = ZNet_FC3L(self.fbsde.n, self.fbsde.m, self.fbsde.d, hidden_size=self.hidden_size).to(dtype=TENSORDTYPE, device=DEVICE)
         
         self.track_X_grad = False
         self.dirac = dirac
@@ -259,14 +217,18 @@ class FBSDE_BMLSolver(object):
 test_solver = FBSDE_BMLSolver(FBSDE_LongSin(n=4))
 with torch.no_grad():
     t, X, Y, Z, dW = test_solver.obtain_XYZ()
+    
+test_solver.set_parameter('sigma_0', 0.4)
+test_solver.set_parameter('r', .0)
+test_solver.set_parameter('H', 50)
 
 terminal_error = test_solver.fbsde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_solver.fbsde.d
 running_error = test_solver.fbsde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_solver.fbsde.r*Y[:-1]+.5*torch.exp(-3*test_solver.fbsde.r*(test_solver.fbsde.dt*test_solver.fbsde.H-t[:-1]))*test_solver.fbsde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_solver.fbsde.d)**3)
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
-assert terminal_error.abs().max() < 1e-15
-assert running_error.abs().max() < 1e-15
-assert martingale_error.abs().max() < 1e-15
+assert terminal_error.abs().max() < 1e-12
+assert running_error.abs().max() < 1e-12
+assert martingale_error.abs().max() < 1e-12
 # -
 
 # # Loss of True Solutions
@@ -279,7 +241,6 @@ optimal_solver.znet = optimal_solver.fbsde.get_Z
 optimal_solver.set_parameter('sigma_0', 0.4)
 optimal_solver.set_parameter('r', .0)
 optimal_solver.set_parameter('H', 50)
-optimal_solver.set_parameter('T', 1.)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
@@ -297,7 +258,7 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 
 # # Train
 
-def solve_LongSin(n, *, repeat=10, **solver_kws):
+def solve_LongSin(n, *, repeat=10, max_steps=2000, **solver_kws):
     tab_logs, fig_logs = [], []
     for epi in range(repeat):
         _solver = FBSDE_BMLSolver(FBSDE_LongSin(n=n))
@@ -310,7 +271,10 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
         _solver.ynet.train()
         _solver.znet.train()
         optimizer.zero_grad()
-        for step in tqdm.trange(3000):
+        
+        pbar = tqdm.trange(max_steps, leave=(epi==repeat-1))
+        pbar.set_description(f"REP: [{epi+1}/{repeat}]")
+        for step in pbar:
             loss = _solver.calc_loss()
             
             fig_logs.append({
@@ -336,6 +300,7 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
             'Err Y0': relative_error_y0,
             'Z0': pred_z0,
             'Err Z0': relative_error_z0,
+            'loss': np.mean([r['loss'] for r in fig_logs if r['epi'] == epi])
         })
 
     return tab_logs, fig_logs
@@ -344,70 +309,71 @@ def solve_LongSin(n, *, repeat=10, **solver_kws):
 # ## Search Hyperparameters
 
 # +
+log_dir = os.path.join(LOGROOTDIR, time_dir())
+os.makedirs(log_dir, exist_ok=False)
+
+os.makedirs(os.path.join(log_dir, "tab_logs"))
+os.makedirs(os.path.join(log_dir, "fig_logs"))
+os.makedirs(os.path.join(log_dir, "args_df"))
+
+# +
+STATEDIM = 4
+REPEATNUM = 2          # number of repeating an experiment
+MAXSTEPS = 200        # max gradient steps
+
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
     'y_lr': [1e-2, 5e-3, 1e-3], #, 5e-4, 5e-5],
     'z_lr': [5e-3, 1e-3, 5e-4],
+
     'batch_size': [512], #, 1024],
-    
+
     'r': [0.],
     'sigma_0': [0.4],
+    'H': [50],
 }
 
-res = []
-for args in itertools.product(*search_mesh.values()):
+args_set = list(itertools.product(*search_mesh.values()))
+for i, args in enumerate(args_set):
     args = dict(zip(search_mesh.keys(), args))
-    if abs(np.log10(args['y_lr']/args['z_lr'])) > 7.9:
-        continue
-
-    tab_logs, fig_logs = solve_LongSin(n=4, repeat=10, **args)
     
-    res.append({
-        'args': args,
-        'tab_logs': tab_logs,
-        'fig_logs': fig_logs,
-    })
+    print(f"EXP: [{i+1}/{len(args_set)}]")
+    tab_logs, fig_logs = solve_LongSin(n=STATEDIM, repeat=REPEATNUM, max_steps=MAXSTEPS, **args)
 
-# +
-tab_logs = [pd.DataFrame(r['tab_logs']) for r in res]
-fig_logs = [pd.DataFrame(r['fig_logs']) for r in res]
+    args_df = pd.DataFrame(tab_logs).drop(columns=['epi']).agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr))).to_frame().T
 
-tab_logs = pd.concat(tab_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
-fig_logs = pd.concat(fig_logs, keys=range(len(res)), names=['args']).reset_index(level='args')
+    pd.DataFrame(fig_logs).to_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv"), index=False)
+    pd.DataFrame(tab_logs).to_csv(os.path.join(log_dir, "tab_logs", f"{i}.csv"), index=False)
+    pd.concat([pd.DataFrame([args]), args_df], axis=1).to_csv(os.path.join(log_dir, "args_df", f"{i}.csv"), index=False)
 # -
 
-log_dir = os.path.join(LOGROOTDIR, time_dir())
-os.makedirs(log_dir, exist_ok=True)
+# ## Result Analysis
 
-# +
-tab_logs.to_csv(os.path.join(log_dir, 'tab_logs.csv'), index=False)
-print(f"tab_logs.csv saved to {log_dir}")
-
-fig_logs.to_csv(os.path.join(log_dir, 'fig_logs.csv'), index=False)
-print(f"fig_logs.csv saved to {log_dir}")
-# -
-
-args_df = tab_logs.groupby('args').agg(lambda arr: format_uncertainty(np.mean(arr), np.std(arr)) ).drop(columns=['epi'])
-args_df = pd.concat([pd.DataFrame([r['args'] for r in res]), args_df], axis=1)
-args_df
-
+args_df = [pd.read_csv(os.path.join(log_dir, "args_df", f"{i}.csv")) for i in range(len(args_set))]
+args_df = pd.concat(args_df, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 args_df.to_csv(os.path.join(log_dir, "args_df.csv"), index=False)
-print(f"args_df.csv saved to {log_dir}")
+print(pd.DataFrame(args_df).reset_index())
+
+fig_logs = [pd.read_csv(os.path.join(log_dir, "fig_logs", f"{i}.csv")) for i in range(len(args_set))]
+fig_logs = pd.concat(fig_logs, keys=range(len(args_set)), names=['args']).reset_index(level='args')
 
 # +
 r_figs = 3
-c_figs = math.ceil(len(res)/r_figs)
+c_figs = math.ceil(len(args_set)/r_figs)
 fig, axes = plt.subplots(c_figs, r_figs, figsize=(4.2*r_figs, 3.6*c_figs))
 if c_figs == 1:
     axes = axes.reshape(1, -1)
 
-fig_logs_gb = fig_logs.groupby('args')    
+fig_logs_gb = fig_logs.groupby('args')
 
 for i, j in itertools.product(range(c_figs), range(r_figs)):
-    if  i*r_figs + j >= len(res):
+    if  i*r_figs + j >= len(args_set):
         break
     sns.lineplot(data=fig_logs_gb.get_group(i*r_figs+j), x='step', y='loss', ax=axes[i,j], errorbar=('ci', 68))
     axes[i,j].set_yscale('log')
 # -
 
 fig.savefig(os.path.join(log_dir, "fig.pdf"))
+print(f"fig.pdf saved to {log_dir}")
+
+print(f"Finished at {time_dir()}")
