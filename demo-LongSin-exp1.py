@@ -122,8 +122,19 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 #
 # 2. *Err Y0*. This is the relative error of the predicted $Y_0$.
 #
-# 3. *Aver Y*. This is the distance between the predict $Y$ and true $Y$:
-#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |v^\theta(ih, X^\theta_i) - v(ih, X^\theta_i)|^2\,\mu(jh). $$
+# 3. *Aver X*. This is the distance between the predict $X$ and true $X$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} | X^\theta_j -X_j)|^2\,\mu(jh). $$
+#
+# 4. *Aver Y*. This is the distance between the predict $Y$ and true $Y$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2\,\mu(jh). $$
+#    
+# 5. *Aver Z*. This is the distance between the predict $Z$ and true $Z$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |u^\theta(ih, X^\theta_j) - u(ih, X_j)|^2\,\mu(jh). $$
+#    
+# 6. *dist*. This is the objective function $\operatorname{dist}_\mu((Y^\theta,Z^\theta),(Y,Z))$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} \Bigl\{ |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2 + h \sum_{i=j}^{N-1} |u^\theta(ih, X^\theta_i) - u(ih, X_i)|^2 \Bigr\}\mu(jh). $$
+
+# ?torch.sum
 
 class Solver_LongSin(ResSolver):
     
@@ -137,18 +148,37 @@ class Solver_LongSin(ResSolver):
         true_y0 = self.sde.true_y0.flatten()[0].item()
         return pred_y0, abs(pred_y0/true_y0 -1.)*100
     
-    def calc_metric_averY(self):
-        r'''Compare the difference between pred_Y and true_Y
-        then average along the time dimension using sde.dirac
-        '''
+    def calc_metric_averXYZ_and_dist(self):
+        r'''Compare the difference between predict (X, Y, Z) and true (X, Y, Z)
+        then average along the time dimension using sde.dirac'''
         data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
                                 dtype=TENSORDTYPE, device=DEVICE)
-        t, X, Y, Z, dW = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
-        true_Y = self.sde.true_v(t, X)
+        t, pred_X, pred_Y, pred_Z, dW = self.sde.calc_XYZ(
+            self.model.ynet, self.model.znet, data,
+        )
+        t, true_X, true_Y, true_Z, dW = self.sde.calc_XYZ(
+            self.sde.true_v, self.sde.true_u, data,
+        )
+        
+        # flat mtraix Z to vector
+        pred_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
+        true_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
+
         weight = self.sde.get_weight_mu(self.dirac)
-        averY = ((Y - true_Y).abs().square()[:-1] * weight).sum(dim=0)
-        averY = torch.sum(averY*averY, dim=-1)
-        return averY.mean().item()
+
+        averX = torch.sum((pred_X - true_X).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averY = torch.sum((pred_Y - true_Y).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averZ = torch.sum((pred_Z - true_Z).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        
+        dist = torch.sum(
+            weight * ((pred_Y - true_Y).square()[:-1]
+                + re_cumsum((pred_Z - true_Z).square()[:-1]*self.sde.h, dim=0)),
+            dim=[0, 2]).mean().item()
+
+        return averX, averY, averZ, dist
 
     def solve(self, pbar):
         tab_logs, fig_logs = [], []
@@ -172,12 +202,15 @@ class Solver_LongSin(ResSolver):
         self.model.eval()
         with torch.no_grad():
             pred_y0, relative_error_y0 = self.calc_metric_y0()
-            averY = self.calc_metric_averY()
+            averX, averY, averZ, dist = self.calc_metric_averXYZ_and_dist()
 
         tab_logs.append({
             'Y0': pred_y0,
             'Err Y0': relative_error_y0,
+            'averX': averX,
             'averY': averY,
+            'averZ': averZ,
+            'dist': dist,
             'loss': fig_logs[-1]['loss'],
         })
 
