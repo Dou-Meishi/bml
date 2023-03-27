@@ -31,7 +31,7 @@ import seaborn as sns
 import bml.config
 
 # change config before loading other modules
-TENSORDTYPE = bml.config.TENSORDTYPE = torch.float64
+TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
 DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
@@ -192,23 +192,23 @@ params = {
         'n': 4,
         'T': 1.0,
         'N': 50,
-        'M': 256,
+        'M': 4096,
         'r': 0.0,
-        'sigma_0': 0.4
+        'sigma_0': 0.4,
     },
     'model': {
-        'hidden_size': 16
+        'hidden_size': 32,
     },
     'solver': {
-        'lr': 5e-2,
+        'lr': 5e-3,
         'dirac': False,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
     'trainer': {
-        'max_epoches': 3,
+        'max_epoches': 9,
         'steps_per_epoch': 200,
-        'lr_decay_per_epoch': 0.9,
+        'lr_decay_per_epoch': 0.6,
     },
 }
 
@@ -239,3 +239,4 @@ plt.plot(fig_logs.loss)
 plt.yscale('log')
 
 plt.show()
+
