@@ -2,12 +2,18 @@ import math
 import time
 import warnings
 
+import numpy as np
 import torch
 
 
 def re_cumsum(t, dim):
     r'''torch.cumsum in reverse direction'''
     return t + torch.sum(t, dim, keepdim=True) - torch.cumsum(t, dim)
+
+
+def running_mean(x, window_size):
+    cumsum = np.cumsum(np.insert(x, 0, 0))
+    return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
 
 
 def format_uncertainty(value, error, sig_fig=2):
