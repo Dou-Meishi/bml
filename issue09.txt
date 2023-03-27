@@ -1,0 +1,12 @@
+Seperate the batch size M from eqaution classes. 
+perhaps the number of time intervals N needs further consideration too.
+
+Maybe M is best suits in ResCalcMixin
+
+Here is the reasones
+
+- The definition of SDE doesn't care about the sample size M.
+
+- Usually, only when it comes to a proper discrete numerical scheme,
+  then we need the number of time intervals N.
+
