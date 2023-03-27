@@ -244,13 +244,13 @@ params = {
     },
     'solver': {
         'lr': 5e-3,
-        'dirac': False,
+        'dirac': True,
         'quad_rule': 'trapezoidal',
         'correction': False,
     },
     'trainer': {
         'max_epoches': 1,
-        'steps_per_epoch': 99,
+        'steps_per_epoch': 499,
         'lr_decay_per_epoch': 0.1,
         
         # these lr are used at the first serveral epoches
