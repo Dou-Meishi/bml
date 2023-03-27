@@ -134,8 +134,6 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 # 6. *dist*. This is the objective function $\operatorname{dist}_\mu((Y^\theta,Z^\theta),(Y,Z))$:
 #    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} \Bigl\{ |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2 + h \sum_{i=j}^{N-1} |u^\theta(ih, X^\theta_i) - u(ih, X_i)|^2 \Bigr\}\mu(jh). $$
 
-# ?torch.sum
-
 class Solver_LongSin(ResSolver):
     
     def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
@@ -239,9 +237,12 @@ params = {
         'correction': True,
     },
     'trainer': {
-        'max_epoches': 3,
-        'steps_per_epoch': 200,
+        'max_epoches': 4,
+        'steps_per_epoch': 50,
         'lr_decay_per_epoch': 0.9,
+        
+        # these lr are used at the first serveral epoches
+        'warm_up_lr': [0.1, 0.2],
     },
 }
 
@@ -253,10 +254,21 @@ params['model']['d'] = sde.d
 model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
 solver = Solver_LongSin(sde, model, **params['solver'])
 
+# add the usual lr to the last
+params['trainer']['warm_up_lr'].append(solver.lr)
+
 tab_logs, fig_logs = [], []
 for epoch in range(params['trainer']['max_epoches']):
     print(f"epoch: {epoch}")
+
+    # select lr
+    if epoch < len(params['trainer']['warm_up_lr']):
+        solver.lr = params['trainer']['warm_up_lr'][epoch]
+    else:
+        solver.lr = params['trainer']['warm_up_lr'][-1]
+
     tab_log, fig_log = solver.solve(tqdm.trange(params['trainer']['steps_per_epoch']))
+
     solver.lr *= params['trainer']['lr_decay_per_epoch']
     
     # add a column to record the current number of epoches
