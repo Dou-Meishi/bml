@@ -244,9 +244,9 @@ params = {
     },
     'solver': {
         'lr': 5e-3,
-        'dirac': True,
+        'dirac': 0.05,
         'quad_rule': 'trapezoidal',
-        'correction': False,
+        'correction': True,
     },
     'trainer': {
         'max_epoches': 1,
