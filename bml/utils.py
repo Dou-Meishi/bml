@@ -21,6 +21,17 @@ def time_dir():
     return time.strftime("%y%m%d-%H%M", time.localtime())
 
 
+def add_column_to_record(record, key, values):
+    r'''Modify this record by adding a new column in place. 
+    
+    - record: list of dict
+    
+    Return the modfied record'''
+    for row, value in zip(record, values):
+        row[key] = value
+    return record
+
+
 def sample_dW(h, n, N, M, *args, **kws):
     r'''Return dW[i,r,*] of M independent sample paths of
     n dimensional standard Brownian Motion with time step h 
