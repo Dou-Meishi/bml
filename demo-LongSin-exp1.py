@@ -201,12 +201,10 @@ solver = Solver_LongSin(sde, model, **params['solver'])
 tab_logs, fig_logs = solver.solve(tqdm.trange(params['max_steps']))
 # -
 
-tab_logs
+print(tab_logs)
 
 fig_logs = pd.DataFrame(fig_logs)
 plt.plot(fig_logs.loss)
 plt.yscale('log')
 
-# # Rerun and Stat
-
-tab_logs
+plt.show()
