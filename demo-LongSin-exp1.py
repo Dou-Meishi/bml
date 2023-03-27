@@ -36,6 +36,7 @@ DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
 from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
+from bml.calc import ResSolver
 from bml.models import YZNet_FC3L
 # -
 
@@ -121,80 +122,91 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 #
 # 2. *Err Y0*. This is the relative error of the predicted $Y_0$.
 
-class FBSDE_Solver(object):
-
-    def __init__(self, sde, model, *, lr, dirac, quad_rule='rectangle'):
-        super().__init__()
-        self.sde = sde
-        self.model = model
-        self.lr = lr
-        self.dirac = dirac
-        self.quad_rule = quad_rule
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        return optimizer
-
-    def calc_loss(self):
-        data = sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M,
-                        dtype=TENSORDTYPE, device=DEVICE)
-        data = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
-        data = self.sde.calc_MC(*data, rule=self.quad_rule)
-        loss = self.sde.calc_Res(data, dirac=self.dirac)
-        return loss
+class Solver_LongSin(ResSolver):
     
+    def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
+        super().__init__(sde, model, lr=lr, dirac=dirac, quad_rule=quad_rule, correction=correction)
+
     def calc_metric_y0(self):
         t0 = self.sde.t[0:1, 0:1, 0:1]
         x0 = self.sde.x0.view(1, 1, -1)
         pred_y0 = self.model.ynet(t0, x0).flatten()[0].item()
-        true_y0 = self.sde.true_v(t0, x0).flatten()[0].item()
+        true_y0 = self.sde.true_y0.flatten()[0].item()
         return pred_y0, abs(pred_y0/true_y0 -1.)*100
+    
+    def solve(self, pbar):
+        tab_logs, fig_logs = [], []
+
+        optimizer = self.configure_optimizers()
+        self.model.train()
+        optimizer.zero_grad()
+
+        for step in pbar:
+            loss = self.calc_loss()
+
+            fig_logs.append({
+                'step': step,
+                'loss': loss.item(),
+            })
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        self.model.eval()
+        with torch.no_grad():
+            pred_y0, relative_error_y0 = self.calc_metric_y0()
+
+        tab_logs.append({
+            'Y0': pred_y0,
+            'Err Y0': relative_error_y0,
+            'loss': fig_logs[-1]['loss'],
+        })
+
+        return tab_logs, fig_logs
 
 
 # # Train
 
 # +
-def solve(self, pbar):
-    tab_logs, fig_logs = [], []
+params = {
+    'sde': {
+        'n': 4,
+        'T': 1.0,
+        'N': 50,
+        'M': 256,
+        'r': 0.0,
+        'sigma_0': 0.4
+    },
+    'model': {
+        'hidden_size': 16
+    },
+    'solver': {
+        'lr': 5e-2,
+        'dirac': False,
+        'quad_rule': 'trapezoidal',
+        'correction': True,
+    },
+    'max_steps': 200,
+}
 
-    optimizer = self.configure_optimizers()
-    self.model.train()
-    optimizer.zero_grad()
+sde = FBSDE_LongSin_ResCalc(**params['sde'])
+params['model']['n'] = sde.n
+params['model']['m'] = sde.m
+params['model']['d'] = sde.d
 
-    for step in pbar:
-        loss = self.calc_loss()
+model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
+solver = Solver_LongSin(sde, model, **params['solver'])
 
-        fig_logs.append({
-            'step': step,
-            'loss': loss.item(),
-        })
-
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-
-    self.model.eval()
-    with torch.no_grad():
-        pred_y0, relative_error_y0 = self.calc_metric_y0()
-
-    tab_logs.append({
-        'Y0': pred_y0,
-        'Err Y0': relative_error_y0,
-        'loss': np.mean([r['loss'] for r in fig_logs])
-    })
-
-    return tab_logs, fig_logs
-
-FBSDE_Solver.solve = solve
+tab_logs, fig_logs = solver.solve(tqdm.trange(params['max_steps']))
 # -
 
-sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=512, r=0., sigma_0=0.4)
-model = YZNet_FC3L(
-    n=sde.n, m=sde.m, d=sde.d,
-    hidden_size=min(64, 1 << math.ceil(math.log2(sde.n + 10))),
-).to(dtype=TENSORDTYPE, device=DEVICE)
-solver = FBSDE_Solver(sde, model, lr=5e-2, dirac=False, quad_rule='rectangle')
+tab_logs
 
-tab_logs, fig_logs = solver.solve(tqdm.trange(200))
+fig_logs = pd.DataFrame(fig_logs)
+plt.plot(fig_logs.loss)
+plt.yscale('log')
+
+# # Rerun and Stat
 
 tab_logs

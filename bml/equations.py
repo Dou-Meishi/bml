@@ -37,3 +37,8 @@ class FBSDE_LongSin(object):
     def true_u(self, t, x):
         return self.sigma_0*100/self.n**2*(torch.exp(-2*self.r*(self.T-t))*torch.sum(torch.sin(x), dim=-1, keepdim=True)*torch.cos(x)).unsqueeze(-2)
 
+    @property
+    def true_y0(self):
+        t0 = torch.zeros(1, dtype=TENSORDTYPE, device=DEVICE)
+        x0 = self.x0
+        return self.true_v(t0, x0)
