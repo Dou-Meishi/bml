@@ -121,6 +121,9 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 # 1. *Y0*. This is the predict value of $Y_0$.
 #
 # 2. *Err Y0*. This is the relative error of the predicted $Y_0$.
+#
+# 3. *Aver Y*. This is the distance between the predict $Y$ and true $Y$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |v^\theta(ih, X^\theta_i) - v(ih, X^\theta_i)|^2\,\mu(jh). $$
 
 class Solver_LongSin(ResSolver):
     
@@ -134,6 +137,19 @@ class Solver_LongSin(ResSolver):
         true_y0 = self.sde.true_y0.flatten()[0].item()
         return pred_y0, abs(pred_y0/true_y0 -1.)*100
     
+    def calc_metric_averY(self):
+        r'''Compare the difference between pred_Y and true_Y
+        then average along the time dimension using sde.dirac
+        '''
+        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
+                                dtype=TENSORDTYPE, device=DEVICE)
+        t, X, Y, Z, dW = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
+        true_Y = self.sde.true_v(t, X)
+        weight = self.sde.get_weight_mu(self.dirac)
+        averY = ((Y - true_Y).abs().square()[:-1] * weight).sum(dim=0)
+        averY = torch.sum(averY*averY, dim=-1)
+        return averY.mean().item()
+
     def solve(self, pbar):
         tab_logs, fig_logs = [], []
 
@@ -156,10 +172,12 @@ class Solver_LongSin(ResSolver):
         self.model.eval()
         with torch.no_grad():
             pred_y0, relative_error_y0 = self.calc_metric_y0()
+            averY = self.calc_metric_averY()
 
         tab_logs.append({
             'Y0': pred_y0,
             'Err Y0': relative_error_y0,
+            'averY': averY,
             'loss': fig_logs[-1]['loss'],
         })
 
@@ -213,8 +231,9 @@ for epoch in range(params['trainer']['max_epoches']):
     fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
 # -
 
-print(tab_logs)
+print(pd.DataFrame(tab_logs))
 
+# +
 fig_logs = pd.DataFrame(fig_logs)
 plt.plot(fig_logs.loss)
 plt.yscale('log')
