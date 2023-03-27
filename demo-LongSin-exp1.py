@@ -187,7 +187,11 @@ params = {
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
-    'max_steps': 200,
+    'trainer': {
+        'max_epoches': 3,
+        'steps_per_epoch': 200,
+        'lr_decay_per_epoch': 0.9,
+    },
 }
 
 sde = FBSDE_LongSin_ResCalc(**params['sde'])
@@ -198,7 +202,15 @@ params['model']['d'] = sde.d
 model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
 solver = Solver_LongSin(sde, model, **params['solver'])
 
-tab_logs, fig_logs = solver.solve(tqdm.trange(params['max_steps']))
+tab_logs, fig_logs = [], []
+for epoch in range(params['trainer']['max_epoches']):
+    print(f"epoch: {epoch}")
+    tab_log, fig_log = solver.solve(tqdm.trange(params['trainer']['steps_per_epoch']))
+    solver.lr *= params['trainer']['lr_decay_per_epoch']
+    
+    # add a column to record the current number of epoches
+    tab_logs += add_column_to_record(tab_log, 'epoch', [epoch] * len(tab_log))
+    fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
 # -
 
 print(tab_logs)
