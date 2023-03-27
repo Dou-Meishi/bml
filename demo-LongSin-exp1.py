@@ -178,14 +178,17 @@ class Solver_LongSin(ResSolver):
 
         return averX, averY, averZ, dist
 
-    def solve(self, pbar):
+    def solve(self, max_steps, pbar=None):
+        if pbar is None:
+            pbar = tqdm.trange(max_steps)
+        
         tab_logs, fig_logs = [], []
 
         optimizer = self.configure_optimizers()
         self.model.train()
         optimizer.zero_grad()
 
-        for step in pbar:
+        for step in range(max_steps):
             loss = self.calc_loss()
 
             fig_logs.append({
@@ -196,6 +199,9 @@ class Solver_LongSin(ResSolver):
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            
+            pbar.update(1)
+            pbar.set_postfix_str(f"Loss: {loss.item():.4f}")
 
         self.model.eval()
         with torch.no_grad():
@@ -210,6 +216,7 @@ class Solver_LongSin(ResSolver):
             'averZ': averZ,
             'dist': dist,
             'loss': fig_logs[-1]['loss'],
+            'val loss': relative_error_y0,
         })
 
         return tab_logs, fig_logs
@@ -217,7 +224,6 @@ class Solver_LongSin(ResSolver):
 
 # # Train
 
-# +
 params = {
     'sde': {
         'n': 4,
@@ -237,7 +243,7 @@ params = {
         'correction': True,
     },
     'trainer': {
-        'max_epoches': 4,
+        'max_epoches': 3,
         'steps_per_epoch': 50,
         'lr_decay_per_epoch': 0.9,
         
@@ -246,6 +252,8 @@ params = {
     },
 }
 
+
+# +
 sde = FBSDE_LongSin_ResCalc(**params['sde'])
 params['model']['n'] = sde.n
 params['model']['m'] = sde.m
@@ -257,9 +265,17 @@ solver = Solver_LongSin(sde, model, **params['solver'])
 # add the usual lr to the last
 params['trainer']['warm_up_lr'].append(solver.lr)
 
+# create progress bar of total max_steps
+max_epoches = params['trainer']['max_epoches']
+pbar = tqdm.tqdm(total=params['trainer']['steps_per_epoch'], 
+                 desc=f"Epoch: 1, Val Loss: 0.0")
+
 tab_logs, fig_logs = [], []
 for epoch in range(params['trainer']['max_epoches']):
-    print(f"epoch: {epoch}")
+    if epoch > 0:  # reset the progress bar at the start of each epoch
+        pbar.reset(total=params['trainer']['steps_per_epoch'])
+        pbar.set_description(
+            f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
 
     # select lr
     if epoch < len(params['trainer']['warm_up_lr']):
@@ -267,13 +283,18 @@ for epoch in range(params['trainer']['max_epoches']):
     else:
         solver.lr = params['trainer']['warm_up_lr'][-1]
 
-    tab_log, fig_log = solver.solve(tqdm.trange(params['trainer']['steps_per_epoch']))
-
+    tab_log, fig_log = solver.solve(params['trainer']['steps_per_epoch'], pbar)
+    
+    val_loss = tab_log[-1]['val loss']
     solver.lr *= params['trainer']['lr_decay_per_epoch']
     
     # add a column to record the current number of epoches
     tab_logs += add_column_to_record(tab_log, 'epoch', [epoch] * len(tab_log))
     fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
+
+# update the final val loss and close
+pbar.set_description(f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
+pbar.close()
 # -
 
 print(pd.DataFrame(tab_logs))
