@@ -224,6 +224,9 @@ class Solver_LongSin(ResSolver):
 
 # # Train
 
+log_dir = os.path.join(LOGROOTDIR, time_dir())
+os.makedirs(log_dir, exist_ok=False)
+
 params = {
     'sde': {
         'n': 4,
@@ -295,12 +298,17 @@ for epoch in range(params['trainer']['max_epoches']):
 # update the final val loss and close
 pbar.set_description(f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
 pbar.close()
-# -
-
-print(pd.DataFrame(tab_logs))
 
 # +
+tab_logs = pd.DataFrame(tab_logs)
 fig_logs = pd.DataFrame(fig_logs)
+
+tab_logs.to_csv(os.path.join(log_dir, "tab_logs.csv"), index=False)
+fig_logs.to_csv(os.path.join(log_dir, "fig_logs.csv"), index=False)
+
+print(tab_logs)
+
+# +
 plt.plot(fig_logs.loss)
 plt.yscale('log')
 
