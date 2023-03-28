@@ -100,7 +100,7 @@ class ResSolver(object):
         return optimizer
 
     def calc_loss(self):
-        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
+        data = self.sample_dW(self.sde.h, self.sde.d, self.sde.N, self.sde.M,
                               dtype=TENSORDTYPE, device=DEVICE)
         data = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
         data = self.sde.calc_MC(*data, rule=self.quad_rule)
