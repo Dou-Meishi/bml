@@ -179,7 +179,7 @@ params = {
     },
     'solver': {
         'lr': 1e-3,
-        'dirac': False,
+        'dirac': True,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
