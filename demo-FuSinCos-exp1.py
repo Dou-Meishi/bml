@@ -32,10 +32,10 @@ import bml.config
 
 # change config before loading other modules
 TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
-DEVICE = bml.config.DEVICE = "cpu"
+DEVICE = bml.config.DEVICE = "cuda:0"
 
 from bml.utils import *
-from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
+from bml.fbsde_rescalc import FBSDE_FuSinCos_ResCalc
 from bml.calc import ResSolver
 from bml.models import YZNet_FC3L
 # -
@@ -68,15 +68,15 @@ LOGROOTDIR = './outputs'
 # # Benchmark of SDE Simulations
 
 # +
-test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
+test_sde = FBSDE_FuSinCos_ResCalc(n=1, T=1.0, N=25, M=4096)
 
 with torch.no_grad():
     dW = corrected_sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M,
                   dtype=TENSORDTYPE, device=DEVICE)
     t, X, Y, Z, dW = test_sde.calc_XYZ(test_sde.true_v, test_sde.true_u, dW)
     
-terminal_error = test_sde.g(X[-1]).squeeze() - X[-1].sin().sum(dim=-1)*10/test_sde.d
-running_error = test_sde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (-test_sde.r*Y[:-1]+.5*torch.exp(-3*test_sde.r*(test_sde.T-t[:-1]))*test_sde.sigma_0**2*(X[:-1].sin().sum(dim=-1, keepdim=True)*10/test_sde.d)**3)
+terminal_error = test_sde.g(X[-1]).squeeze() - torch.sin(test_sde.T+X[-1]).squeeze()
+running_error = test_sde.f(t[:-1], X[:-1], Y[:-1], Z[:-1]) - (Y[:-1]*(Z[:-1].squeeze(-1))-torch.cos(t[:-1]+X[:-1]))
 martingale_error = (Z[:-1] @ dW.unsqueeze(-1)).squeeze() - torch.sum(Z[:-1].squeeze(-2)*dW,dim=-1)
 
 assert terminal_error.abs().max() < 1e-6
@@ -87,7 +87,7 @@ assert martingale_error.abs().max() < 1e-6
 # # Loss of True Solutions
 
 # +
-test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
+test_sde = FBSDE_FuSinCos_ResCalc(n=1, T=1.0, N=25, M=4096)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
@@ -103,7 +103,6 @@ for _ in tqdm.trange(10):
 print("δ-BML: ", format_uncertainty(np.mean(dirac_loss), np.std(dirac_loss)))
 print("λ-BML: ", format_uncertainty(np.mean(lambd_loss), np.std(lambd_loss)))
 print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
-
 # -
 
 # # Reformulate
@@ -134,7 +133,7 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 # 6. *dist*. This is the objective function $\operatorname{dist}_\mu((Y^\theta,Z^\theta),(Y,Z))$:
 #    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} \Bigl\{ |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2 + h \sum_{i=j}^{N-1} |u^\theta(ih, X^\theta_i) - u(ih, X_i)|^2 \Bigr\}\mu(jh). $$
 
-class Solver_LongSin(ResSolver):
+class Solver_FuSinCos(ResSolver):
     
     def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
         super().__init__(sde, model, lr=lr, dirac=dirac, quad_rule=quad_rule, correction=correction)
@@ -235,26 +234,24 @@ os.makedirs(log_dir, exist_ok=False)
 
 params = {
     'sde': {
-        'n': 4,
+        'n': 1,
         'T': 1.0,
-        'N': 50,
-        'M': 1024,
-        'r': 0.0,
-        'sigma_0': 0.4,
+        'N': 25,
+        'M': 4096,
     },
     'model': {
-        'hidden_size': 32,
+        'hidden_size': 8
     },
     'solver': {
-        'lr': 1e-3,
+        'lr': 5e-3,
         'dirac': False,
         'quad_rule': 'trapezoidal',
-        'correction': True,
+        'correction': False,
     },
     'trainer': {
         'max_epoches': 1,
-        'steps_per_epoch': 4000,
-        'lr_decay_per_epoch': 0.9,
+        'steps_per_epoch': 99,
+        'lr_decay_per_epoch': 0.1,
         
         # these lr are used at the first serveral epoches
         'warm_up_lr': [],
@@ -263,13 +260,13 @@ params = {
 
 
 # +
-sde = FBSDE_LongSin_ResCalc(**params['sde'])
+sde = FBSDE_FuSinCos_ResCalc(**params['sde'])
 params['model']['n'] = sde.n
 params['model']['m'] = sde.m
 params['model']['d'] = sde.d
 
 model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
-solver = Solver_LongSin(sde, model, **params['solver'])
+solver = Solver_FuSinCos(sde, model, **params['solver'])
 
 # add the usual lr to the last
 params['trainer']['warm_up_lr'].append(solver.lr)
@@ -345,4 +342,3 @@ ax3.set_title('Relative error of Y0 prediction')
 fig.savefig(os.path.join(log_dir, 'fig.pdf'))
 
 plt.show()
-
