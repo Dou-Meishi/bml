@@ -247,7 +247,7 @@ params = {
     },
     'solver': {
         'lr': 1e-3,
-        'dirac': False,
+        'dirac': 0.05,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
@@ -345,4 +345,3 @@ ax3.set_title('Relative error of Y0 prediction')
 fig.savefig(os.path.join(log_dir, 'fig.pdf'))
 
 plt.show()
-
