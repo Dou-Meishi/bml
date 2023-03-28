@@ -178,8 +178,8 @@ params = {
         'hidden_size': 16,
     },
     'solver': {
-        'lr': 5e-3,
-        'dirac': True,
+        'lr': 1e-3,
+        'dirac': 0.05,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
