@@ -106,4 +106,10 @@ class FBSDE_JiLQ5(object):
 
     @property
     def true_y0(self):
-        return 0.9568
+        return -0.9568 * self.x0
+
+    def calc_cost(self, t, x, u):
+        x2 = torch.sum(x*x, dim=-1, keepdim=True)
+        u2 = torch.sum(u*u, dim=-1, keepdim=True)
+        cost = .5*x2[-1:] + torch.sum(.25*x2[:-1] + u2[:-1], dim=0, keepdim=True)*self.h
+        return cost
