@@ -247,7 +247,7 @@ params = {
     },
     'solver': {
         'lr': 1e-3,
-        'dirac': False,
+        'dirac': 0.05,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
