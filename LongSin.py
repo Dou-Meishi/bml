@@ -323,8 +323,9 @@ MAXSTEPS = 200        # max gradient steps
 
 search_mesh = {
     'dirac': [False, True, 0.05], #, True],
-    'y_lr': [5e-2], #, 5e-4, 5e-5],
-    'z_lr': [5e-2],
+    'y_lr': [1e-2, 5e-3, 1e-3], #, 5e-4, 5e-5],
+    'z_lr': [5e-3, 1e-3, 5e-4],
+
     'batch_size': [512], #, 1024],
 
     'r': [0.],

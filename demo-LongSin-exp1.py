@@ -32,10 +32,11 @@ import bml.config
 
 # change config before loading other modules
 TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
-DEVICE = bml.config.DEVICE = "cuda:0"
+DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
 from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
+from bml.calc import ResSolver
 from bml.models import YZNet_FC3L
 # -
 
@@ -120,85 +121,188 @@ print("γ-BML: ", format_uncertainty(np.mean(gamma_loss), np.std(gamma_loss)))
 # 1. *Y0*. This is the predict value of $Y_0$.
 #
 # 2. *Err Y0*. This is the relative error of the predicted $Y_0$.
+#
+# 3. *Aver X*. This is the distance between the predict $X$ and true $X$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} | X^\theta_j -X_j)|^2\,\mu(jh). $$
+#
+# 4. *Aver Y*. This is the distance between the predict $Y$ and true $Y$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2\,\mu(jh). $$
+#    
+# 5. *Aver Z*. This is the distance between the predict $Z$ and true $Z$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} |u^\theta(ih, X^\theta_j) - u(ih, X_j)|^2\,\mu(jh). $$
+#    
+# 6. *dist*. This is the objective function $\operatorname{dist}_\mu((Y^\theta,Z^\theta),(Y,Z))$:
+#    $$ \overline{\operatorname{\mathbb{E}}}_r \sum_{j=0}^{N-1} \Bigl\{ |v^\theta(ih, X^\theta_j) - v(ih, X_j)|^2 + h \sum_{i=j}^{N-1} |u^\theta(ih, X^\theta_i) - u(ih, X_i)|^2 \Bigr\}\mu(jh). $$
 
-class FBSDE_Solver(object):
-
-    def __init__(self, sde, model, *, lr, dirac, quad_rule='rectangle'):
-        super().__init__()
-        self.sde = sde
-        self.model = model
-        self.lr = lr
-        self.dirac = dirac
-        self.quad_rule = quad_rule
-
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-        return optimizer
-
-    def calc_loss(self):
-        data = sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M,
-                        dtype=TENSORDTYPE, device=DEVICE)
-        data = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
-        data = self.sde.calc_MC(*data, rule=self.quad_rule)
-        loss = self.sde.calc_Res(data, dirac=self.dirac)
-        return loss
+class Solver_LongSin(ResSolver):
     
+    def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
+        super().__init__(sde, model, lr=lr, dirac=dirac, quad_rule=quad_rule, correction=correction)
+
     def calc_metric_y0(self):
         t0 = self.sde.t[0:1, 0:1, 0:1]
         x0 = self.sde.x0.view(1, 1, -1)
         pred_y0 = self.model.ynet(t0, x0).flatten()[0].item()
-        true_y0 = self.sde.true_v(t0, x0).flatten()[0].item()
+        true_y0 = self.sde.true_y0.flatten()[0].item()
         return pred_y0, abs(pred_y0/true_y0 -1.)*100
+    
+    def calc_metric_averXYZ_and_dist(self):
+        r'''Compare the difference between predict (X, Y, Z) and true (X, Y, Z)
+        then average along the time dimension using sde.dirac'''
+        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
+                                dtype=TENSORDTYPE, device=DEVICE)
+        t, pred_X, pred_Y, pred_Z, dW = self.sde.calc_XYZ(
+            self.model.ynet, self.model.znet, data,
+        )
+        t, true_X, true_Y, true_Z, dW = self.sde.calc_XYZ(
+            self.sde.true_v, self.sde.true_u, data,
+        )
+        
+        # flat mtraix Z to vector
+        pred_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
+        true_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
+
+        weight = self.sde.get_weight_mu(self.dirac)
+
+        averX = torch.sum((pred_X - true_X).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averY = torch.sum((pred_Y - true_Y).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averZ = torch.sum((pred_Z - true_Z).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        
+        dist = torch.sum(
+            weight * ((pred_Y - true_Y).square()[:-1]
+                + re_cumsum((pred_Z - true_Z).square()[:-1]*self.sde.h, dim=0)),
+            dim=[0, 2]).mean().item()
+
+        return averX, averY, averZ, dist
+
+    def solve(self, max_steps, pbar=None):
+        if pbar is None:
+            pbar = tqdm.trange(max_steps)
+        
+        tab_logs, fig_logs = [], []
+
+        optimizer = self.configure_optimizers()
+        self.model.train()
+        optimizer.zero_grad()
+
+        for step in range(max_steps):
+            loss = self.calc_loss()
+
+            fig_logs.append({
+                'step': step,
+                'loss': loss.item(),
+            })
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+            
+            pbar.update(1)
+            pbar.set_postfix_str(f"Loss: {loss.item():.4f}")
+
+        self.model.eval()
+        with torch.no_grad():
+            pred_y0, relative_error_y0 = self.calc_metric_y0()
+            averX, averY, averZ, dist = self.calc_metric_averXYZ_and_dist()
+
+        tab_logs.append({
+            'Y0': pred_y0,
+            'Err Y0': relative_error_y0,
+            'averX': averX,
+            'averY': averY,
+            'averZ': averZ,
+            'dist': dist,
+            'loss': fig_logs[-1]['loss'],
+            'val loss': relative_error_y0,
+        })
+
+        return tab_logs, fig_logs
 
 
 # # Train
 
+params = {
+    'sde': {
+        'n': 4,
+        'T': 1.0,
+        'N': 50,
+        'M': 4096,
+        'r': 0.0,
+        'sigma_0': 0.4,
+    },
+    'model': {
+        'hidden_size': 32,
+    },
+    'solver': {
+        'lr': 5e-3,
+        'dirac': False,
+        'quad_rule': 'trapezoidal',
+        'correction': True,
+    },
+    'trainer': {
+        'max_epoches': 3,
+        'steps_per_epoch': 50,
+        'lr_decay_per_epoch': 0.9,
+        
+        # these lr are used at the first serveral epoches
+        'warm_up_lr': [0.1, 0.2],
+    },
+}
+
+
 # +
-def solve(self, pbar):
-    tab_logs, fig_logs = [], []
+sde = FBSDE_LongSin_ResCalc(**params['sde'])
+params['model']['n'] = sde.n
+params['model']['m'] = sde.m
+params['model']['d'] = sde.d
 
-    optimizer = self.configure_optimizers()
-    self.model.train()
-    optimizer.zero_grad()
+model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
+solver = Solver_LongSin(sde, model, **params['solver'])
 
-    for step in pbar:
-        loss = self.calc_loss()
+# add the usual lr to the last
+params['trainer']['warm_up_lr'].append(solver.lr)
 
-        fig_logs.append({
-            'step': step,
-            'loss': loss.item(),
-        })
+# create progress bar of total max_steps
+max_epoches = params['trainer']['max_epoches']
+pbar = tqdm.tqdm(total=params['trainer']['steps_per_epoch'], 
+                 desc=f"Epoch: 1, Val Loss: 0.0")
 
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+tab_logs, fig_logs = [], []
+for epoch in range(params['trainer']['max_epoches']):
+    if epoch > 0:  # reset the progress bar at the start of each epoch
+        pbar.reset(total=params['trainer']['steps_per_epoch'])
+        pbar.set_description(
+            f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
 
-    self.model.eval()
-    with torch.no_grad():
-        pred_y0, relative_error_y0 = self.calc_metric_y0()
+    # select lr
+    if epoch < len(params['trainer']['warm_up_lr']):
+        solver.lr = params['trainer']['warm_up_lr'][epoch]
+    else:
+        solver.lr = params['trainer']['warm_up_lr'][-1]
 
-    tab_logs.append({
-        'Y0': pred_y0,
-        'Err Y0': relative_error_y0,
-        'loss': fig_logs[-1]['loss'],
-    })
+    tab_log, fig_log = solver.solve(params['trainer']['steps_per_epoch'], pbar)
+    
+    val_loss = tab_log[-1]['val loss']
+    solver.lr *= params['trainer']['lr_decay_per_epoch']
+    
+    # add a column to record the current number of epoches
+    tab_logs += add_column_to_record(tab_log, 'epoch', [epoch] * len(tab_log))
+    fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
 
-    return tab_logs, fig_logs
-
-FBSDE_Solver.solve = solve
+# update the final val loss and close
+pbar.set_description(f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
+pbar.close()
 # -
 
-sde = FBSDE_LongSin_ResCalc(n=4, T=1., N=50, M=4096, r=0., sigma_0=0.4)
-model = YZNet_FC3L(n=sde.n, m=sde.m, d=sde.d, hidden_size=64).to(
-        dtype=TENSORDTYPE, device=DEVICE)
-solver = FBSDE_Solver(sde, model, lr=5e-3, dirac=False, quad_rule='trapezoidal')
+print(pd.DataFrame(tab_logs))
 
-for _ in range(10):
-    tab_logs, fig_logs = solver.solve(tqdm.trange(200))
-    solver.lr *= 2**(-1./ 2)
-
-print(tab_logs)
-
-plt.plot(pd.DataFrame(fig_logs).loss)
+# +
+fig_logs = pd.DataFrame(fig_logs)
+plt.plot(fig_logs.loss)
 plt.yscale('log')
+
 plt.show()
+

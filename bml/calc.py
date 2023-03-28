@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from .config import TENSORDTYPE, DEVICE
-from .utils import re_cumsum
+from .utils import re_cumsum, sample_dW, corrected_sample_dW
 
 
 class ResCalcMixin(object):
@@ -76,3 +76,33 @@ class ResCalcMixin(object):
         
         return t, X, Y, Z, dW
 
+
+class ResSolver(object):
+
+    def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
+        super().__init__()
+        self.sde = sde
+        self.model = model
+        self.lr = lr
+        self.dirac = dirac
+        self.quad_rule = quad_rule
+        self.correction = correction
+
+    @property
+    def sample_dW(self):
+        if self.correction is True:
+            return corrected_sample_dW
+        else:
+            return sample_dW
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        return optimizer
+
+    def calc_loss(self):
+        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
+                              dtype=TENSORDTYPE, device=DEVICE)
+        data = self.sde.calc_XYZ(self.model.ynet, self.model.znet, data)
+        data = self.sde.calc_MC(*data, rule=self.quad_rule)
+        loss = self.sde.calc_Res(data, dirac=self.dirac)
+        return loss
