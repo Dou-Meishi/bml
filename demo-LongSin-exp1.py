@@ -71,7 +71,7 @@ LOGROOTDIR = './outputs'
 test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
 
 with torch.no_grad():
-    dW = sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M,
+    dW = corrected_sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M,
                   dtype=TENSORDTYPE, device=DEVICE)
     t, X, Y, Z, dW = test_sde.calc_XYZ(test_sde.true_v, test_sde.true_u, dW)
     
@@ -91,7 +91,7 @@ test_sde = FBSDE_LongSin_ResCalc(n=4, T=1.0, N=50, M=1024, r=0., sigma_0=0.4)
 
 dirac_loss, lambd_loss, gamma_loss = [], [], []
 for _ in tqdm.trange(10):
-    dW = sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M, dtype=TENSORDTYPE, device=DEVICE)
+    dW = corrected_sample_dW(test_sde.h, test_sde.n, test_sde.N, test_sde.M, dtype=TENSORDTYPE, device=DEVICE)
 
     dirac_loss.append(test_sde.calc_Res(test_sde.calc_MC(*test_sde.calc_XYZ(
         test_sde.true_v, test_sde.true_u, dW)), dirac=True).item())
@@ -240,20 +240,20 @@ params = {
         'N': 50,
         'M': 1024,
         'r': 0.0,
-        'sigma_0': 0.4
+        'sigma_0': 0.4,
     },
     'model': {
         'hidden_size': 32,
     },
     'solver': {
         'lr': 1e-3,
-        'dirac': False,
+        'dirac': True,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
     'trainer': {
         'max_epoches': 1,
-        'steps_per_epoch': 4000,
+        'steps_per_epoch': 2000,
         'lr_decay_per_epoch': 0.9,
         
         # these lr are used at the first serveral epoches
