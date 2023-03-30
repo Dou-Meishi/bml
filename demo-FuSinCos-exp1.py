@@ -32,7 +32,7 @@ import bml.config
 
 # change config before loading other modules
 TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
-DEVICE = bml.config.DEVICE = "cuda:0"
+DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
 from bml.fbsde_rescalc import FBSDE_FuSinCos_ResCalc
@@ -243,14 +243,14 @@ params = {
         'hidden_size': 8
     },
     'solver': {
-        'lr': 5e-3,
+        'lr': 1e-3,
         'dirac': False,
         'quad_rule': 'trapezoidal',
-        'correction': False,
+        'correction': True,
     },
     'trainer': {
         'max_epoches': 1,
-        'steps_per_epoch': 99,
+        'steps_per_epoch': 1999,
         'lr_decay_per_epoch': 0.1,
         
         # these lr are used at the first serveral epoches
