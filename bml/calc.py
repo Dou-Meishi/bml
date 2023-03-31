@@ -1,3 +1,4 @@
+import tqdm
 import torch
 import numpy as np
 
@@ -106,3 +107,98 @@ class ResSolver(object):
         data = self.sde.calc_MC(*data, rule=self.quad_rule)
         loss = self.sde.calc_Res(data, dirac=self.dirac)
         return loss
+
+    def calc_metric_y0(self):
+        t0 = self.sde.t[0:1, 0:1, 0:1]
+        x0 = self.sde.x0.view(1, 1, -1)
+        # compare their first element 
+        pred_y0 = self.model.ynet(t0, x0).flatten()[0].item()
+        true_y0 = self.sde.true_y0.flatten()[0].item()
+        return {
+            'Y0': pred_y0,
+            'Err Y0': abs(pred_y0/true_y0 -1.) * 100,
+            'True Y0': true_y0,
+        }
+
+    def calc_metric_averXYZ_and_dist(self):
+        r'''Compare the difference between predict (X, Y, Z) and true (X, Y, Z)
+        then average along the time dimension using sde.dirac'''
+        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
+                                dtype=TENSORDTYPE, device=DEVICE)
+        t, pred_X, pred_Y, pred_Z, dW = self.sde.calc_XYZ(
+            self.model.ynet, self.model.znet, data,
+        )
+        t, true_X, true_Y, true_Z, dW = self.sde.calc_XYZ(
+            self.sde.true_v, self.sde.true_u, data,
+        )
+        
+        # flat mtraix Z to vector
+        pred_Z = pred_Z.reshape(1 + self.sde.N, self.sde.M, -1)
+        true_Z = pred_Z.reshape(1 + self.sde.N, self.sde.M, -1)
+
+        weight = self.sde.get_weight_mu(self.dirac)
+
+        averX = torch.sum((pred_X - true_X).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averY = torch.sum((pred_Y - true_Y).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+        averZ = torch.sum((pred_Z - true_Z).square()[:-1]
+            * weight, dim=[0, 2]).mean().item()
+
+        dist = torch.sum(
+            weight * ((pred_Y - true_Y).square()[:-1]
+                + re_cumsum((pred_Z - true_Z).square()[:-1]*self.sde.h, dim=0)),
+            dim=[0, 2]).mean().item()
+
+        return {
+            'averX': averX,
+            'averY': averY,
+            'averZ': averZ,
+            'dist': dist,
+        }
+
+    def solve(self, max_steps, pbar=None):
+        if pbar is None:
+            pbar = tqdm.trange(max_steps)
+
+        tab_logs = []    # summary metrics at the end of the training
+        fig_logs = []    # running metrics during training
+
+        optimizer = self.configure_optimizers()
+        self.model.train()
+        optimizer.zero_grad()
+
+        for step in range(max_steps):
+            loss = self.calc_loss()
+
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+            pbar.update(1)
+            pbar.set_postfix_str(f"Loss: {loss.item():.4f}")
+
+            self.model.eval()
+            with torch.no_grad():
+                metric_y0 = self.calc_metric_y0()
+
+            fig_logs.append({
+                'step': step,
+                'loss': loss.item(),
+                **metric_y0,
+            })
+
+        self.model.eval()
+        with torch.no_grad():
+            metric_y0 = self.calc_metric_y0()
+            # specific validation loss
+            val_loss = metric_y0['Err Y0']
+
+        tab_logs.append({
+            'loss': fig_logs[-1]['loss'],
+            'val loss': val_loss,
+            **metric_y0,
+        })
+
+        return tab_logs, fig_logs
+
