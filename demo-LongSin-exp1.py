@@ -35,6 +35,7 @@ TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
 DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
+from bml.trainer import Trainer
 from bml.fbsde_rescalc import FBSDE_LongSin_ResCalc
 from bml.calc import ResSolver
 from bml.models import YZNet_FC3L
@@ -139,50 +140,12 @@ class Solver_LongSin(ResSolver):
     def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
         super().__init__(sde, model, lr=lr, dirac=dirac, quad_rule=quad_rule, correction=correction)
 
-    def calc_metric_y0(self):
-        t0 = self.sde.t[0:1, 0:1, 0:1]
-        x0 = self.sde.x0.view(1, 1, -1)
-        pred_y0 = self.model.ynet(t0, x0).flatten()[0].item()
-        true_y0 = self.sde.true_y0.flatten()[0].item()
-        return pred_y0, abs(pred_y0/true_y0 -1.)*100
-    
-    def calc_metric_averXYZ_and_dist(self):
-        r'''Compare the difference between predict (X, Y, Z) and true (X, Y, Z)
-        then average along the time dimension using sde.dirac'''
-        data = self.sample_dW(self.sde.h, self.sde.n, self.sde.N, self.sde.M, 
-                                dtype=TENSORDTYPE, device=DEVICE)
-        t, pred_X, pred_Y, pred_Z, dW = self.sde.calc_XYZ(
-            self.model.ynet, self.model.znet, data,
-        )
-        t, true_X, true_Y, true_Z, dW = self.sde.calc_XYZ(
-            self.sde.true_v, self.sde.true_u, data,
-        )
-        
-        # flat mtraix Z to vector
-        pred_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
-        true_Z = pred_Z.reshape(1 + sde.N, sde.M, -1)
-
-        weight = self.sde.get_weight_mu(self.dirac)
-
-        averX = torch.sum((pred_X - true_X).square()[:-1]
-            * weight, dim=[0, 2]).mean().item()
-        averY = torch.sum((pred_Y - true_Y).square()[:-1]
-            * weight, dim=[0, 2]).mean().item()
-        averZ = torch.sum((pred_Z - true_Z).square()[:-1]
-            * weight, dim=[0, 2]).mean().item()
-        
-        dist = torch.sum(
-            weight * ((pred_Y - true_Y).square()[:-1]
-                + re_cumsum((pred_Z - true_Z).square()[:-1]*self.sde.h, dim=0)),
-            dim=[0, 2]).mean().item()
-
-        return averX, averY, averZ, dist
-
     def solve(self, max_steps, pbar=None):
         if pbar is None:
             pbar = tqdm.trange(max_steps)
         
-        tab_logs, fig_logs = [], []
+        tab_logs = []    # summary metrics at the end of the training
+        fig_logs = []    # running metrics during training
 
         optimizer = self.configure_optimizers()
         self.model.train()
@@ -200,32 +163,35 @@ class Solver_LongSin(ResSolver):
 
             self.model.eval()
             with torch.no_grad():
-                pred_y0, relative_error_y0 = self.calc_metric_y0()
+                metric_y0 = self.calc_metric_y0()
 
             fig_logs.append({
                 'step': step,
-                'Y0': pred_y0,
-                'val loss': relative_error_y0,
                 'loss': loss.item(),
+                **metric_y0,
             })
 
         self.model.eval()
         with torch.no_grad():
-            pred_y0, relative_error_y0 = self.calc_metric_y0()
-            averX, averY, averZ, dist = self.calc_metric_averXYZ_and_dist()
+            metric_y0 = self.calc_metric_y0()
+            metric_averXYZ_and_dist = self.calc_metric_averXYZ_and_dist()
+            # specific validation loss
+            val_loss = metric_y0['Err Y0']
 
         tab_logs.append({
-            'Y0': pred_y0,
-            'Err Y0': relative_error_y0,
-            'averX': averX,
-            'averY': averY,
-            'averZ': averZ,
-            'dist': dist,
-            'val loss': relative_error_y0,
             'loss': fig_logs[-1]['loss'],
+            'val loss': val_loss,
+            **metric_y0,
+            **metric_averXYZ_and_dist,
         })
 
         return tab_logs, fig_logs
+
+
+class Trainer_LongSin(Trainer):
+    
+    def __init__(self, *args, **kws):
+        super().__init__(*args, **kws)
 
 
 # # Train
@@ -270,40 +236,12 @@ params['model']['d'] = sde.d
 
 model = YZNet_FC3L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
 solver = Solver_LongSin(sde, model, **params['solver'])
+trainer = Trainer_LongSin(**params['trainer'])
 
-# add the usual lr to the last
-params['trainer']['warm_up_lr'].append(solver.lr)
+tab_logs, fig_logs = trainer.train(solver)
+# -
 
-# create progress bar of total max_steps
-max_epoches = params['trainer']['max_epoches']
-pbar = tqdm.tqdm(total=params['trainer']['steps_per_epoch'], 
-                 desc=f"Epoch: 1, Val Loss: 0.0")
-
-tab_logs, fig_logs = [], []
-for epoch in range(params['trainer']['max_epoches']):
-    if epoch > 0:  # reset the progress bar at the start of each epoch
-        pbar.reset(total=params['trainer']['steps_per_epoch'])
-        pbar.set_description(
-            f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
-
-    # select lr
-    if epoch < len(params['trainer']['warm_up_lr']):
-        solver.lr = params['trainer']['warm_up_lr'][epoch]
-    else:
-        solver.lr = params['trainer']['warm_up_lr'][-1]
-
-    tab_log, fig_log = solver.solve(params['trainer']['steps_per_epoch'], pbar)
-    
-    val_loss = tab_log[-1]['val loss']
-    solver.lr *= params['trainer']['lr_decay_per_epoch']
-    
-    # add a column to record the current number of epoches
-    tab_logs += add_column_to_record(tab_log, 'epoch', [epoch] * len(tab_log))
-    fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
-
-# update the final val loss and close
-pbar.set_description(f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
-pbar.close()
+# # Save and Show Results
 
 # +
 tab_logs = pd.DataFrame(tab_logs)
@@ -316,8 +254,7 @@ print(tab_logs)
 
 print(f"Results saved to {log_dir}")
 
-# # Plotting
-
+# +
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
 
 # Plot the running mean of the loss
@@ -329,14 +266,14 @@ ax1.set_title('Training loss')
 
 # Plot the predicted Y0 and true Y0
 ax2.plot(fig_logs.Y0, label='Predicted Y0')
-ax2.plot([sde.true_y0.item()]*len(fig_logs.Y0), label='True Y0')
+ax2.plot(fig_logs['True Y0'], label='True Y0')
 ax2.set_xlabel('Step')
 ax2.set_ylabel('Y0')
 ax2.set_title('Y0 prediction')
 ax2.legend()
 
 # Plot the relative error of Y0
-ax3.plot(.01*fig_logs['val loss'])
+ax3.plot(.01*fig_logs['Err Y0'])
 ax3.set_yscale('log')
 ax3.set_xlabel('Step')
 ax3.set_ylabel('Error')

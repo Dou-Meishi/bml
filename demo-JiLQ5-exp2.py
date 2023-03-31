@@ -35,6 +35,7 @@ TENSORDTYPE = bml.config.TENSORDTYPE = torch.float32
 DEVICE = bml.config.DEVICE = "cpu"
 
 from bml.utils import *
+from bml.trainer import Trainer
 from bml.fbsde_rescalc import FBSDE_JiLQ5_ResCalc
 from bml.calc import ResSolver
 from bml.models import YZNet_FC3L, YZNet_FC2L
@@ -98,13 +99,6 @@ class Solver_JiLQ5(ResSolver):
     def __init__(self, sde, model, *, lr, dirac, quad_rule, correction):
         super().__init__(sde, model, lr=lr, dirac=dirac, quad_rule=quad_rule, correction=correction)
 
-    def calc_metric_y0(self):
-        t0 = self.sde.t[0:1, 0:1, 0:1]
-        x0 = self.sde.x0.view(1, 1, -1)
-        pred_y0 = self.model.ynet(t0, x0).flatten()[0].item()
-        true_y0 = self.sde.true_y0.flatten()[0].item()
-        return pred_y0, abs(pred_y0/true_y0 -1.)*100
-
     def calc_metric_cost(self):
         data = self.sample_dW(self.sde.h, self.sde.d, self.sde.N, self.sde.M, 
                                 dtype=TENSORDTYPE, device=DEVICE)
@@ -113,53 +107,13 @@ class Solver_JiLQ5(ResSolver):
         )
         u = (pred_Y + pred_Z.squeeze(-1)) / 2
         cost = self.sde.calc_cost(t, pred_X, u)
-        return cost.mean().item()
+        return {'Cost': cost.mean().item()}
 
-    def solve(self, max_steps, pbar=None):
-        if pbar is None:
-            pbar = tqdm.trange(max_steps)
-        
-        tab_logs, fig_logs = [], []
 
-        optimizer = self.configure_optimizers()
-        self.model.train()
-        optimizer.zero_grad()
-
-        for step in range(max_steps):
-            loss = self.calc_loss()
-
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            
-            pbar.update(1)
-            pbar.set_postfix_str(f"Loss: {loss.item():.4f}")
-
-            self.model.eval()
-            with torch.no_grad():
-                pred_y0, relative_error_y0 = self.calc_metric_y0()
-
-            fig_logs.append({
-                'step': step,
-                'Y0': pred_y0,
-                'val loss': relative_error_y0,
-                'loss': loss.item(),
-            })
-
-        self.model.eval()
-        with torch.no_grad():
-            pred_y0, relative_error_y0 = self.calc_metric_y0()
-            cost = self.calc_metric_cost()
-
-        tab_logs.append({
-            'Y0': pred_y0,
-            'Err Y0': relative_error_y0,
-            'Cost': cost,
-            'val loss': cost,
-            'loss': fig_logs[-1]['loss'],
-        })
-
-        return tab_logs, fig_logs
+class Trainer_JiLQ5(Trainer):
+    
+    def __init__(self, *args, **kws):
+        super().__init__(*args, **kws)
 
 
 # # Train
@@ -202,40 +156,12 @@ params['model']['d'] = sde.d
 
 model = YZNet_FC2L(**params['model']).to(dtype=TENSORDTYPE, device=DEVICE)
 solver = Solver_JiLQ5(sde, model, **params['solver'])
+trainer = Trainer(**params['trainer'])
 
-# add the usual lr to the last
-params['trainer']['warm_up_lr'].append(solver.lr)
+tab_logs, fig_logs = trainer.train(solver)
+# -
 
-# create progress bar of total max_steps
-max_epoches = params['trainer']['max_epoches']
-pbar = tqdm.tqdm(total=params['trainer']['steps_per_epoch'], 
-                 desc=f"Epoch: 1, Val Loss: 0.0")
-
-tab_logs, fig_logs = [], []
-for epoch in range(params['trainer']['max_epoches']):
-    if epoch > 0:  # reset the progress bar at the start of each epoch
-        pbar.reset(total=params['trainer']['steps_per_epoch'])
-        pbar.set_description(
-            f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
-
-    # select lr
-    if epoch < len(params['trainer']['warm_up_lr']):
-        solver.lr = params['trainer']['warm_up_lr'][epoch]
-    else:
-        solver.lr = params['trainer']['warm_up_lr'][-1]
-
-    tab_log, fig_log = solver.solve(params['trainer']['steps_per_epoch'], pbar)
-    
-    val_loss = tab_log[-1]['val loss']
-    solver.lr *= params['trainer']['lr_decay_per_epoch']
-    
-    # add a column to record the current number of epoches
-    tab_logs += add_column_to_record(tab_log, 'epoch', [epoch] * len(tab_log))
-    fig_logs += add_column_to_record(fig_log, 'epoch', [epoch] * len(fig_log))
-
-# update the final val loss and close
-pbar.set_description(f"Epoch: {epoch + 1}/{max_epoches}, Val Loss: {val_loss:.4f}")
-pbar.close()
+# # Save and Show Results
 
 # +
 tab_logs = pd.DataFrame(tab_logs)
@@ -248,8 +174,7 @@ print(tab_logs)
 
 print(f"Results saved to {log_dir}")
 
-# # Plotting
-
+# +
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4))
 
 # Plot the running mean of the loss
@@ -261,14 +186,14 @@ ax1.set_title('Training loss')
 
 # Plot the predicted Y0 and true Y0
 ax2.plot(fig_logs.Y0, label='Predicted Y0')
-ax2.plot([sde.true_y0[0].item()]*len(fig_logs.Y0), label='True Y0')
+ax2.plot(fig_logs['True Y0'], label='True Y0')
 ax2.set_xlabel('Step')
 ax2.set_ylabel('Y0')
 ax2.set_title('Y0 prediction')
 ax2.legend()
 
 # Plot the relative error of Y0
-ax3.plot(.01*fig_logs['val loss'])
+ax3.plot(.01*fig_logs['Err Y0'])
 ax3.set_yscale('log')
 ax3.set_xlabel('Step')
 ax3.set_ylabel('Error')
