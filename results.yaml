@@ -1,0 +1,53 @@
+FuSinCos EXP1:
+  - dirac: True
+    log_dir: outputs/230329-0234
+    commit ID: 835a4d0
+    label: "δ-BML"
+  - dirac: False
+    log_dir: outputs/230329-0237
+    commit ID: 38f37fe
+    label: "λ-BML"
+  - dirac: 0.05
+    log_dir: outputs/230329-0242
+    commit ID: 48a7a6a
+    label: "γ-BML"
+LongSin EXP1:
+  - dirac: True
+    log_dir: outputs/230329-0017
+    commit ID: d94da2c
+    label: "δ-BML"
+  - dirac: False
+    log_dir: outputs/230329-0003
+    commit ID: a21e2e9
+    label: "λ-BML"
+  - dirac: 0.05
+    log_dir: outputs/230329-0011
+    commit ID: 752f8be
+    label: "γ-BML"
+JiLQ EXP1:
+  - dirac: True
+    log_dir: outputs/230329-0049
+    commit ID: 0faf7ae
+    label: "δ-BML"
+  - dirac: False
+    log_dir: outputs/230329-0046
+    commit ID: e4625c8
+    label: "λ-BML"
+  - dirac: 0.05
+    log_dir: outputs/230328-2036
+    commit ID: f099ff9
+    label: "γ-BML"
+JiLQ EXP2:
+  - dirac: True
+    log_dir: outputs/230328-2059
+    commit ID: 1728a62
+    label: "δ-BML"
+  - dirac: False
+    log_dir: outputs/230328-2051
+    commit ID: 32c0e77
+    label: "λ-BML"
+  - dirac: 0.05
+    log_dir: outputs/230329-0114
+    commit ID: 41771e9
+    label: "γ-BML"
+
