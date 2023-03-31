@@ -24,7 +24,7 @@ def format_uncertainty(value, error, sig_fig=2):
 
 
 def time_dir():
-    return time.strftime("%y%m%d-%H%M", time.localtime())
+    return time.strftime("%y%m%d-%H%M%S", time.localtime())
 
 
 def add_column_to_record(record, key, values):
