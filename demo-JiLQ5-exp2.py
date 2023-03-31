@@ -169,7 +169,7 @@ os.makedirs(log_dir, exist_ok=False)
 
 params = {
     'sde': {
-        'n': 5,
+        'n': 100,
         'T': .1,
         'N': 25,
         'M': 64,
@@ -178,14 +178,14 @@ params = {
         'hidden_size': 16,
     },
     'solver': {
-        'lr': 1e-3,
+        'lr': 2e-3,
         'dirac': 0.05,
         'quad_rule': 'trapezoidal',
         'correction': True,
     },
     'trainer': {
         'max_epoches': 1,
-        'steps_per_epoch': 500,
+        'steps_per_epoch': 1999,
         'lr_decay_per_epoch': 0.9,
         
         # these lr are used at the first serveral epoches
